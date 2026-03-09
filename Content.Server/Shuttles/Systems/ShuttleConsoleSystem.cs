@@ -22,6 +22,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Utility;
 using Content.Shared.UserInterface;
 using Robust.Shared.Prototypes;
+using Content.Shared.Interaction.Components;
 
 namespace Content.Server.Shuttles.Systems;
 
@@ -327,6 +328,7 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
             return;
         }
 
+        EnsureComp<BlockMovementComponent>(entity);
         _eyeSystem.SetZoom(entity, component.Zoom, ignoreLimits: true);
 
         component.SubscribedPilots.Add(entity);
@@ -346,6 +348,7 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
         if (!TryComp<ShuttleConsoleComponent>(console, out var helm))
             return;
 
+        RemComp<BlockMovementComponent>(pilotUid);
         pilotComponent.Console = null;
         pilotComponent.Position = null;
         _eyeSystem.ResetZoom(pilotUid);

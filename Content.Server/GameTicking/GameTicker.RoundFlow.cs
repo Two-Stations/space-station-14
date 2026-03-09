@@ -96,40 +96,38 @@ namespace Content.Server.GameTicking
             AddGamePresetRules();
 
             var maps = new List<GameMapPrototype>();
+            var (map1, map2) = _gameMapManager.GetSelectedMaps();
 
-            // the map might have been force-set by something
-            // (i.e. votemap or forcemap)
-            var (mainStationMap, secondaryStationMap) = _gameMapManager.GetSelectedMaps();
-            if (mainStationMap == null)
+            if (map1 == null)
             {
-                // otherwise set the map using the config rules
                 _gameMapManager.SelectMapByConfigRules();
-                (mainStationMap, secondaryStationMap) = _gameMapManager.GetSelectedMaps();
+                (map1, map2) = _gameMapManager.GetSelectedMaps();
             }
 
-            if (mainStationMap != null)
-            {
-                maps.Add(mainStationMap);
-            }
+            if (map1 != null)
+                maps.Add(map1);
             else
-            {
                 throw new Exception("invalid config; couldn't select a valid station map!");
-            }
-            if (secondaryStationMap != null)
-            {
-                maps.Add(secondaryStationMap);
-            }
+
+            if (map2 != null)
+                maps.Add(map2);
 
             if (CurrentPreset?.MapPool != null &&
-                _prototypeManager.TryIndex<GameMapPoolPrototype>(CurrentPreset.MapPool, out var pool) &&
-                !pool.Maps.Contains(mainStationMap.ID))
+                _prototypeManager.TryIndex<GameMapPoolPrototype>(CurrentPreset.MapPool, out var pool))
             {
-                var msg = Loc.GetString("game-ticker-start-round-invalid-map",
-                    ("map", mainStationMap.MapName),
-                    ("mode", Loc.GetString(CurrentPreset.ModeTitle)));
-                Log.Debug(msg);
-                SendServerMessage(msg);
+                foreach (var map in maps)
+                {
+                    if (!pool.Maps.Contains(map.ID))
+                    {
+                        var msg = Loc.GetString("game-ticker-start-round-invalid-map",
+                            ("map", map.MapName),
+                            ("mode", Loc.GetString(CurrentPreset.ModeTitle)));
+                        Log.Debug(msg);
+                        SendServerMessage(msg);
+                    }
+                }
             }
+
 
             // Let game rules dictate what maps we should load.
             RaiseLocalEvent(new LoadingMapsEvent(maps));
@@ -138,19 +136,17 @@ namespace Content.Server.GameTicking
             {
                 _map.CreateMap(out var mapId, runMapInit: false);
                 DefaultMap = mapId;
-                _loadedMaps.Add(mapId);
                 return;
             }
 
             for (var i = 0; i < maps.Count; i++)
             {
                 LoadGameMap(maps[i], out var mapId);
+                _loadedMaps.Add(mapId);
                 DebugTools.Assert(!_map.IsInitialized(mapId));
 
                 if (i == 0)
                     DefaultMap = mapId;
-                
-                _loadedMaps.Add(mapId);
             }
         }
 
@@ -430,7 +426,6 @@ namespace Content.Server.GameTicking
                 return;
             }
 
-            // MapInitialize *before* spawning players, our codebase is too shit to do it afterwards...
             foreach (var mapId in _loadedMaps)
             {
                 _map.InitializeMap(mapId);
@@ -526,8 +521,7 @@ namespace Content.Server.GameTicking
             var textEv = new RoundEndTextAppendEvent();
             RaiseLocalEvent(textEv);
 
-            var roundEndText = $"{text}
-{textEv.Text}";
+            var roundEndText = $"{text}\n{textEv.Text}";
 
             //Get the timespan of the round.
             var roundDuration = RoundDuration();
@@ -644,8 +638,7 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round end message:
-{e}");
+                Log.Error($"Error while sending discord round end message:\n{e}");
             }
         }
 
@@ -711,8 +704,7 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round starting message:
-{e}");
+                Log.Error($"Error while sending discord round starting message:\n{e}");
             }
         }
 
@@ -738,6 +730,7 @@ namespace Content.Server.GameTicking
             EntityManager.FlushEntities();
 
             _mapManager.Restart();
+            _loadedMaps.Clear();
 
             _banManager.Restart();
 
@@ -825,8 +818,14 @@ namespace Content.Server.GameTicking
                 if (_webhookIdentifier == null)
                     return;
 
-                var mapName = _gameMapManager.GetSelectedMap()?.MapName ?? Loc.GetString("discord-round-notifications-unknown-map");
-                var content = Loc.GetString("discord-round-notifications-started", ("id", RoundId), ("map", mapName));
+                var (map1, map2) = _gameMapManager.GetSelectedMaps();
+                var mapText = map1?.MapName ?? Loc.GetString("discord-round-notifications-unknown-map");
+                if (map2 != null)
+                {
+                    mapText = Loc.GetString("game-ticker-two-maps-selected", ("map1", mapText), ("map2", map2.MapName));
+                }
+
+                var content = Loc.GetString("discord-round-notifications-started", ("id", RoundId), ("map", mapText));
 
                 var payload = new WebhookPayload { Content = content };
 
@@ -834,8 +833,7 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round start message:
-{e}");
+                Log.Error($"Error while sending discord round start message:\n{e}");
             }
         }
     }
@@ -1005,8 +1003,7 @@ namespace Content.Server.GameTicking
         public void AddLine(string text)
         {
             if (_doNewLine)
-                Text += "
-";
+                Text += "\n";
 
             Text += text;
             _doNewLine = true;

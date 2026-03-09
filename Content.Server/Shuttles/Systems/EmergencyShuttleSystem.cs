@@ -453,6 +453,13 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
                 dockResults.Add(dockResult);
         }
 
+        if (dockResults.Count == 0)
+        {
+            Log.Warning("Could not find any emergency shuttles to dock. Round will not end via shuttle.");
+            EmergencyShuttleArrived = false;
+            return;
+        }
+
         // Make the shuttle wait longer if it couldn't dock in the normal spot.
         // We have to handle the possibility of there being multiple stations, so since the shuttle timer is global,
         // use the WORST value we have.
@@ -602,6 +609,11 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
 
             Log.Error($"Encountered deleted emergency shuttle during initialization of {ToPrettyString(ent)}");
             ent.Comp1.EmergencyShuttle = null;
+        }
+
+        if (!Exists(ent.Comp2.MapEntity))
+        {
+            AddCentcomm(ent.Owner, ent.Comp2);
         }
 
         if (!TryComp(ent.Comp2.MapEntity, out MapComponent? map))
