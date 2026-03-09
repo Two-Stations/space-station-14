@@ -303,6 +303,10 @@ public sealed partial class StationSystem : SharedStationSystem
 
         if (name is not null)
             RenameStation(station, name, false);
+        
+        EnsureComp<TradeStationComponent>(station);
+        EnsureComp<SalvageExpeditionDataComponent>(station);
+        EnsureComp<StationCargoShuttleComponent>(station);
 
         DebugTools.Assert(HasComp<StationDataComponent>(station), "Stations should have StationData in their prototype.");
 

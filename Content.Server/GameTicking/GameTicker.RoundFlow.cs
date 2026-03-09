@@ -99,16 +99,14 @@ namespace Content.Server.GameTicking
 
             // the map might have been force-set by something
             // (i.e. votemap or forcemap)
-            var mainStationMap = _gameMapManager.GetSelectedMap();
+            var (mainStationMap, secondaryStationMap) = _gameMapManager.GetSelectedMaps();
             if (mainStationMap == null)
             {
                 // otherwise set the map using the config rules
                 _gameMapManager.SelectMapByConfigRules();
-                mainStationMap = _gameMapManager.GetSelectedMap();
+                (mainStationMap, secondaryStationMap) = _gameMapManager.GetSelectedMaps();
             }
 
-            // Small chance the above could return no map.
-            // ideally SelectMapByConfigRules will always find a valid map
             if (mainStationMap != null)
             {
                 maps.Add(mainStationMap);
@@ -116,6 +114,10 @@ namespace Content.Server.GameTicking
             else
             {
                 throw new Exception("invalid config; couldn't select a valid station map!");
+            }
+            if (secondaryStationMap != null)
+            {
+                maps.Add(secondaryStationMap);
             }
 
             if (CurrentPreset?.MapPool != null &&
@@ -136,6 +138,7 @@ namespace Content.Server.GameTicking
             {
                 _map.CreateMap(out var mapId, runMapInit: false);
                 DefaultMap = mapId;
+                _loadedMaps.Add(mapId);
                 return;
             }
 
@@ -146,6 +149,8 @@ namespace Content.Server.GameTicking
 
                 if (i == 0)
                     DefaultMap = mapId;
+                
+                _loadedMaps.Add(mapId);
             }
         }
 
@@ -426,7 +431,10 @@ namespace Content.Server.GameTicking
             }
 
             // MapInitialize *before* spawning players, our codebase is too shit to do it afterwards...
-            _map.InitializeMap(DefaultMap);
+            foreach (var mapId in _loadedMaps)
+            {
+                _map.InitializeMap(mapId);
+            }
 
             SpawnPlayers(readyPlayers, readyPlayerProfiles, force);
 
@@ -518,7 +526,8 @@ namespace Content.Server.GameTicking
             var textEv = new RoundEndTextAppendEvent();
             RaiseLocalEvent(textEv);
 
-            var roundEndText = $"{text}\n{textEv.Text}";
+            var roundEndText = $"{text}
+{textEv.Text}";
 
             //Get the timespan of the round.
             var roundDuration = RoundDuration();
@@ -635,7 +644,8 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round end message:\n{e}");
+                Log.Error($"Error while sending discord round end message:
+{e}");
             }
         }
 
@@ -701,7 +711,8 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round starting message:\n{e}");
+                Log.Error($"Error while sending discord round starting message:
+{e}");
             }
         }
 
@@ -823,7 +834,8 @@ namespace Content.Server.GameTicking
             }
             catch (Exception e)
             {
-                Log.Error($"Error while sending discord round start message:\n{e}");
+                Log.Error($"Error while sending discord round start message:
+{e}");
             }
         }
     }
@@ -993,7 +1005,8 @@ namespace Content.Server.GameTicking
         public void AddLine(string text)
         {
             if (_doNewLine)
-                Text += "\n";
+                Text += "
+";
 
             Text += text;
             _doNewLine = true;

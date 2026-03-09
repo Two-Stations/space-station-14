@@ -68,8 +68,15 @@ namespace Content.Server.GameTicking
 
             if (!foundOne)
             {
-                stationNames.Append(_gameMapManager.GetSelectedMap()?.MapName ??
-                                    Loc.GetString("game-ticker-no-map-selected"));
+                var (map1, map2) = _gameMapManager.GetSelectedMaps();
+                if (map2 != null)
+                {
+                    stationNames.Append(Loc.GetString("game-ticker-two-maps-selected", ("map1", map1?.MapName ?? "???"), ("map2", map2.MapName)));
+                }
+                else
+                {
+                    stationNames.Append(map1?.MapName ?? Loc.GetString("game-ticker-no-map-selected"));
+                }
             }
 
             var gmTitle = (Decoy == null) ? Loc.GetString(preset.ModeTitle) : Loc.GetString(Decoy.ModeTitle);

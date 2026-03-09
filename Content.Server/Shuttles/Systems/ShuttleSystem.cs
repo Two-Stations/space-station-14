@@ -72,6 +72,7 @@ public sealed partial class ShuttleSystem : SharedShuttleSystem
     public override void Initialize()
     {
         base.Initialize();
+        _cfg.SetCVar(CCVars.GridFill, true);
 
         _buckleQuery = GetEntityQuery<BuckleComponent>();
         _gridQuery = GetEntityQuery<MapGridComponent>();

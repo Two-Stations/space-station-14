@@ -74,4 +74,14 @@ public interface IGameMapManager
     /// <param name="gameMap">name of the map</param>
     /// <returns>existence</returns>
     bool CheckMapExists(string gameMap);
+
+    /// <summary>
+    /// Sets the selected maps for the next round.
+    /// </summary>
+    void SetSelectedMaps(string mapId1, string mapId2);
+
+    /// <summary>
+    /// Gets the currently selected maps.
+    /// </summary>
+    (GameMapPrototype? map1, GameMapPrototype? map2) GetSelectedMaps();
 }

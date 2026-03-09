@@ -71,6 +71,9 @@ namespace Content.Server.GameTicking
 
         [ViewVariables] public MapId DefaultMap { get; private set; }
 
+        [ViewVariables]
+        private readonly List<MapId> _loadedMaps = new();
+
         private ISawmill _sawmill = default!;
 
         private bool _randomizeCharacters;

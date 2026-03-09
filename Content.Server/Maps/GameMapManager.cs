@@ -27,7 +27,9 @@ public sealed class GameMapManager : IGameMapManager
     [ViewVariables(VVAccess.ReadOnly)]
     private GameMapPrototype? _configSelectedMap;
     [ViewVariables(VVAccess.ReadOnly)]
-    private GameMapPrototype? _selectedMap; // Don't change this value during a round!
+    private GameMapPrototype? _selectedMap1; // Don't change this value during a round!
+    [ViewVariables(VVAccess.ReadOnly)]
+    private GameMapPrototype? _selectedMap2; // Don't change this value during a round!
     [ViewVariables(VVAccess.ReadOnly)]
     private bool _mapRotationEnabled;
     [ViewVariables(VVAccess.ReadOnly)]
@@ -131,19 +133,26 @@ public sealed class GameMapManager : IGameMapManager
 
     public GameMapPrototype? GetSelectedMap()
     {
-        return _configSelectedMap ?? _selectedMap;
+        return _configSelectedMap ?? _selectedMap1;
+    }
+
+    public (GameMapPrototype? map1, GameMapPrototype? map2) GetSelectedMaps()
+    {
+        return (_selectedMap1, _selectedMap2);
     }
 
     public void ClearSelectedMap()
     {
-        _selectedMap = default!;
+        _selectedMap1 = null;
+        _selectedMap2 = null;
     }
 
     public bool TrySelectMapIfEligible(string gameMap)
     {
         if (!TryLookupMap(gameMap, out var map) || !IsMapEligible(map))
             return false;
-        _selectedMap = map;
+        _selectedMap1 = map;
+        _selectedMap2 = null;
         return true;
     }
 
@@ -151,20 +160,34 @@ public sealed class GameMapManager : IGameMapManager
     {
         if (!TryLookupMap(gameMap, out var map))
             throw new ArgumentException($"The map \"{gameMap}\" is invalid!");
-        _selectedMap = map;
+        _selectedMap1 = map;
+        _selectedMap2 = null;
     }
+
+    public void SetSelectedMaps(string mapId1, string mapId2)
+    {
+        if (!TryLookupMap(mapId1, out var map1))
+            throw new ArgumentException($"The map \"{mapId1}\" is invalid!");
+        if (!TryLookupMap(mapId2, out var map2))
+            throw new ArgumentException($"The map \"{mapId2}\" is invalid!");
+        _selectedMap1 = map1;
+        _selectedMap2 = map2;
+    }
+
 
     public void SelectMapRandom()
     {
         var maps = CurrentlyEligibleMaps().ToList();
-        _selectedMap = _random.Pick(maps);
+        _selectedMap1 = _random.Pick(maps);
+        _selectedMap2 = null;
     }
 
     public void SelectMapFromRotationQueue(bool markAsPlayed = false)
     {
         var map = GetFirstInRotationQueue();
 
-        _selectedMap = map;
+        _selectedMap1 = map;
+        _selectedMap2 = null;
 
         if (markAsPlayed)
             EnqueueMap(map.ID);
