@@ -19,10 +19,12 @@ using Robust.Server.GameObjects;
 using Robust.Shared.Collections;
 using Robust.Shared.GameStates;
 using Robust.Shared.Map;
+using Robust.Shared.Physics;
+using Robust.Shared.Physics.Components;
+using Robust.Shared.Physics.Systems;
 using Robust.Shared.Utility;
 using Content.Shared.UserInterface;
 using Robust.Shared.Prototypes;
-using Content.Shared.Interaction.Components;
 
 namespace Content.Server.Shuttles.Systems;
 
@@ -39,6 +41,7 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
     [Dependency] private readonly TagSystem _tags = default!;
     [Dependency] private readonly UserInterfaceSystem _ui = default!;
     [Dependency] private readonly SharedContentEyeSystem _eyeSystem = default!;
+    [Dependency] private readonly SharedPhysicsSystem _physics = default!;
 
     private EntityQuery<MetaDataComponent> _metaQuery;
     private EntityQuery<TransformComponent> _xformQuery;
@@ -174,8 +177,7 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
         if (!_tags.HasTag(user, CanPilotTag) ||
             !TryComp<ShuttleConsoleComponent>(uid, out var component) ||
             !this.IsPowered(uid, EntityManager) ||
-            !Transform(uid).Anchored ||
-            !_blocker.CanInteract(user, uid))
+            !Transform(uid).Anchored)
         {
             return false;
         }
@@ -328,7 +330,6 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
             return;
         }
 
-        EnsureComp<BlockMovementComponent>(entity);
         _eyeSystem.SetZoom(entity, component.Zoom, ignoreLimits: true);
 
         component.SubscribedPilots.Add(entity);
@@ -339,6 +340,11 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
         ActionBlockerSystem.UpdateCanMove(entity);
         pilotComponent.Position = Comp<TransformComponent>(entity).Coordinates;
         Dirty(entity, pilotComponent);
+
+        if (TryComp<PhysicsComponent>(entity, out var physics))
+        {
+            _physics.SetBodyType(entity, BodyType.KinematicController, body: physics);
+        }
     }
 
     public void RemovePilot(EntityUid pilotUid, PilotComponent pilotComponent)
@@ -348,7 +354,6 @@ public sealed partial class ShuttleConsoleSystem : SharedShuttleConsoleSystem
         if (!TryComp<ShuttleConsoleComponent>(console, out var helm))
             return;
 
-        RemComp<BlockMovementComponent>(pilotUid);
         pilotComponent.Console = null;
         pilotComponent.Position = null;
         _eyeSystem.ResetZoom(pilotUid);
