@@ -1,7 +1,10 @@
 using Content.Server.Administration;
 using Content.Server.Shuttles.Systems;
 using Content.Shared.Administration;
+using Content.Shared.CCVar;
+using Robust.Shared.Configuration;
 using Robust.Shared.Console;
+using System;
 
 namespace Content.Server.Shuttles.Commands;
 
@@ -11,12 +14,14 @@ namespace Content.Server.Shuttles.Commands;
 [AdminCommand(AdminFlags.Fun)]
 public sealed class DockEmergencyShuttleCommand : LocalizedEntityCommands
 {
+    [Dependency] private readonly IConfigurationManager _configManager = default!;
     [Dependency] private readonly EmergencyShuttleSystem _shuttleSystem = default!;
 
     public override string Command => "dockemergencyshuttle";
 
     public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        _shuttleSystem.DockEmergencyShuttle();
+        var time = TimeSpan.FromSeconds(_configManager.GetCVar(CCVars.EmergencyShuttleDockTime));
+        _shuttleSystem.CallEmergencyShuttle(null, time);
     }
 }

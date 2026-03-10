@@ -140,7 +140,7 @@ namespace Content.Server.RoundEnd
         /// <param name="text">text in the announcement of shuttle calling</param>
         /// <param name="name">name in the announcement of shuttle calling</param>
         /// <param name="cantRecall">if the station shouldn't be able to recall the shuttle</param>
-        public void RequestRoundEnd(EntityUid? requester = null, bool checkCooldown = true, string text = "round-end-system-shuttle-called-announcement", string name = "round-end-system-shuttle-sender-announcement", bool cantRecall = false)
+        public void RequestRoundEnd(EntityUid? requester = null, bool checkCooldown = true, string text = "round-end-system-shuttle-called-announcement", string name = "round-end-system-shuttle-sender-announcement", bool cantRecall = false, EntityUid? station = null)
         {
             var duration = DefaultCountdownDuration;
 
@@ -155,7 +155,7 @@ namespace Content.Server.RoundEnd
                 }
             }
 
-            RequestRoundEnd(duration, requester, checkCooldown, text, name, cantRecall);
+            RequestRoundEnd(duration, requester, checkCooldown, text, name, cantRecall, station);
         }
 
         /// <summary>
@@ -167,7 +167,8 @@ namespace Content.Server.RoundEnd
         /// <param name="text">text in the announcement of shuttle calling</param>
         /// <param name="name">name in the announcement of shuttle calling</param>
         /// <param name="cantRecall">if the station shouldn't be able to recall the shuttle</param>
-        public void RequestRoundEnd(TimeSpan countdownTime, EntityUid? requester = null, bool checkCooldown = true, string text = "round-end-system-shuttle-called-announcement", string name = "round-end-system-shuttle-sender-announcement", bool cantRecall = false)
+        /// <param name="station">The station to call the shuttle to.</param>
+        public void RequestRoundEnd(TimeSpan countdownTime, EntityUid? requester = null, bool checkCooldown = true, string text = "round-end-system-shuttle-called-announcement", string name = "round-end-system-shuttle-sender-announcement", bool cantRecall = false, EntityUid? station = null)
         {
             if (_gameTicker.RunLevel != GameRunLevel.InRound)
                 return;
@@ -220,10 +221,15 @@ namespace Content.Server.RoundEnd
             ExpectedCountdownEnd = _gameTiming.CurTime + countdownTime;
 
             // TODO full game saves
-            Timer.Spawn(countdownTime, _shuttle.DockEmergencyShuttle, _countdownTokenSource.Token);
+            var dockTime = TimeSpan.FromSeconds(_cfg.GetCVar(CCVars.EmergencyShuttleDockTime));
+            Timer.Spawn(countdownTime, () => _shuttle.CallEmergencyShuttle(station, dockTime), _countdownTokenSource.Token);
 
             ActivateCooldown();
             RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
+
+            var destMap = station.HasValue
+                ? Transform(_stationSystem.GetLargestGrid(station.Value)!.Value).MapUid
+                : GetStation();
 
             var shuttle = _shuttle.GetShuttle();
             if (shuttle != null && TryComp<DeviceNetworkComponent>(shuttle, out var net))
@@ -232,7 +238,7 @@ namespace Content.Server.RoundEnd
                 {
                     [ShuttleTimerMasks.ShuttleMap] = shuttle,
                     [ShuttleTimerMasks.SourceMap] = GetCentcomm(),
-                    [ShuttleTimerMasks.DestMap] = GetStation(),
+                    [ShuttleTimerMasks.DestMap] = destMap,
                     [ShuttleTimerMasks.ShuttleTime] = countdownTime,
                     [ShuttleTimerMasks.SourceTime] = countdownTime + TimeSpan.FromSeconds(_shuttle.TransitTime + _cfg.GetCVar(CCVars.EmergencyShuttleDockTime)),
                     [ShuttleTimerMasks.DestTime] = countdownTime,
@@ -387,7 +393,7 @@ namespace Content.Server.RoundEnd
                                         : _cfg.GetCVar(CCVars.EmergencyShuttleAutoCallTime);
             if (mins != 0 && _gameTiming.CurTime - AutoCallStartTime > TimeSpan.FromMinutes(mins))
             {
-                if (!_shuttle.EmergencyShuttleArrived && ExpectedCountdownEnd is null)
+                if (!_shuttle.IsAnyShuttleCalled() && ExpectedCountdownEnd is null)
                 {
                     _autoCalledBefore = true; // Corvax-Announcements: Move before call RequestRoundEnd to play correct announcement sound type
                     RequestRoundEnd(null, false, "round-end-system-shuttle-auto-called-announcement");

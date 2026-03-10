@@ -14,6 +14,7 @@ using Content.Server.RoundEnd;
 using Content.Server.Screens.Components;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Events;
+using Content.Server.Station.Components;
 using Content.Server.Station.Events;
 using Content.Server.Station.Systems;
 using Content.Shared.Access.Systems;
@@ -26,10 +27,12 @@ using Content.Shared.Localizations;
 using Content.Shared.Shuttles.Components;
 using Content.Shared.Shuttles.Events;
 using Content.Shared.Shuttles.Systems;
+using Content.Shared.Station.Components;
 using Content.Shared.Tag;
 using Content.Shared.Tiles;
 using Robust.Server.GameObjects;
 using Robust.Shared.Audio.Systems;
+using Robust.Shared.Configuration;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
@@ -50,6 +53,7 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     [Dependency] private readonly IAdminManager _admin = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
+    [Dependency] private readonly IConfigurationManager _configManager = default!;
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly AccessReaderSystem _reader = default!;
     [Dependency] private readonly ChatSystem _chatSystem = default!;
@@ -71,6 +75,7 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     private const float ShuttleSpawnBuffer = 1f;
 
     private bool _emergencyShuttleEnabled;
+    private readonly HashSet<EntityUid> _calledStations = new();
 
     private static readonly ProtoId<TagPrototype> DockTag = "DockEmergency";
 
@@ -78,10 +83,12 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     {
         base.Initialize();
 
-        ConfigManager.SetCVar(CCVars.EmergencyShuttleEnabled, true);
-        _emergencyShuttleEnabled = ConfigManager.GetCVar(CCVars.EmergencyShuttleEnabled);
+        // CVar emergency_shuttle_enabled is obsolete and only kept for round backwards compatibility.
+        // It can be removed at any time, and this system will be permanently enabled.
+        _configManager.SetCVar(CCVars.EmergencyShuttleEnabled, true);
+        _emergencyShuttleEnabled = _configManager.GetCVar(CCVars.EmergencyShuttleEnabled);
         // Don't immediately invoke as roundstart will just handle it.
-        Subs.CVar(ConfigManager, CCVars.EmergencyShuttleEnabled, SetEmergencyShuttleEnabled);
+        Subs.CVar(_configManager, CCVars.EmergencyShuttleEnabled, SetEmergencyShuttleEnabled);
 
         SubscribeLocalEvent<RoundStartingEvent>(OnRoundStart);
         SubscribeLocalEvent<RoundRestartCleanupEvent>(OnRoundCleanup);
@@ -99,12 +106,92 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     {
         CleanupEmergencyConsole();
         _roundEndCancelToken = new CancellationTokenSource();
+        _calledStations.Clear();
     }
 
     private void OnRoundCleanup(RoundRestartCleanupEvent ev)
     {
         _roundEndCancelToken?.Cancel();
         _roundEndCancelToken = null;
+        _calledStations.Clear();
+    }
+
+    /// <summary>
+    /// Calls the emergency shuttle to the specified station, or all stations if null.
+    /// </summary>
+    public void CallEmergencyShuttle(EntityUid? station, TimeSpan time)
+    {
+        if (!_emergencyShuttleEnabled)
+        {
+            _roundEnd.EndRound();
+            return;
+        }
+
+        _consoleAccumulator = (float)time.TotalSeconds;
+
+        var stationsToCall = new List<Entity<StationEmergencyShuttleComponent>>();
+
+        if (station != null)
+        {
+            if (_calledStations.Contains(station.Value))
+                return;
+
+            if (TryComp<StationEmergencyShuttleComponent>(station, out var stationComp))
+            {
+                stationsToCall.Add((station.Value, stationComp));
+            }
+        }
+        else
+        {
+            var query = AllEntityQuery<StationEmergencyShuttleComponent>();
+            while (query.MoveNext(out var uid, out var comp))
+            {
+                if (_calledStations.Contains(uid))
+                    continue;
+
+                stationsToCall.Add((uid, comp));
+            }
+        }
+
+        var dockResults = new List<ShuttleDockResult>();
+
+        foreach (var stationToCall in stationsToCall)
+        {
+            if (DockSingleEmergencyShuttle(stationToCall.Owner, stationToCall.Comp) is { } dockResult)
+            {
+                dockResults.Add(dockResult);
+                _calledStations.Add(stationToCall.Owner);
+                stationToCall.Comp.Called = true;
+            }
+        }
+
+        if (dockResults.Count == 0)
+        {
+            Log.Warning("Could not find any emergency shuttles to dock.");
+            return;
+        }
+
+        // Make the shuttle wait longer if it couldn't dock in the normal spot.
+        // We have to handle the possibility of there being multiple stations, so since the shuttle timer is global,
+        // use the WORST value we have.
+        var worstResult = dockResults.Max(x => x.ResultType);
+        var multiplier = worstResult switch
+        {
+            ShuttleDockResultType.OtherDock => _configManager.GetCVar(
+                CCVars.EmergencyShuttleDockTimeMultiplierOtherDock),
+            ShuttleDockResultType.NoDock => _configManager.GetCVar(
+                CCVars.EmergencyShuttleDockTimeMultiplierNoDock),
+            _ => 1,
+        };
+
+        _consoleAccumulator *= multiplier;
+
+        foreach (var shuttleDockResult in dockResults)
+        {
+            AnnounceShuttleDock(shuttleDockResult, multiplier > 1);
+        }
+
+        _commsConsole.UpdateCommsConsoleInterface();
     }
 
     private void OnCentcommShutdown(EntityUid uid, StationCentcommComponent component, ComponentShutdown args)
@@ -128,6 +215,8 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
         AllEntityQuery<EmergencyShuttleComponent>().MoveNext(out var shuttle, out _);
         return shuttle;
     }
+
+    public bool IsAnyShuttleCalled() => _calledStations.Any();
 
     private void SetEmergencyShuttleEnabled(bool value)
     {
@@ -229,7 +318,7 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     /// </summary>
     private void OnEmergencyFTLComplete(EntityUid uid, EmergencyShuttleComponent component, ref FTLCompletedEvent args)
     {
-        var countdownTime = TimeSpan.FromSeconds(ConfigManager.GetCVar(CCVars.RoundRestartTime));
+        var countdownTime = TimeSpan.FromSeconds(_configManager.GetCVar(CCVars.RoundRestartTime));
         var shuttle = args.Entity;
         if (TryComp<DeviceNetworkComponent>(shuttle, out var net))
         {
@@ -260,10 +349,12 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     /// <summary>
     ///     Attempts to dock a station's emergency shuttle.
     /// </summary>
-    /// <seealso cref="DockEmergencyShuttle"/>
     public ShuttleDockResult? DockSingleEmergencyShuttle(EntityUid stationUid, StationEmergencyShuttleComponent? stationShuttle = null)
     {
         if (!Resolve(stationUid, ref stationShuttle))
+            return null;
+
+        if (stationShuttle.Called)
             return null;
 
         if (!TryComp(stationShuttle.EmergencyShuttle, out TransformComponent? xform) ||
@@ -421,68 +512,6 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     private void OnStationStartup(Entity<StationEmergencyShuttleComponent> ent, ref StationPostInitEvent args)
     {
         AddEmergencyShuttle((ent, ent));
-    }
-
-    /// <summary>
-    /// Teleports the emergency shuttle to its station and starts the countdown until it launches.
-    /// </summary>
-    /// <remarks>
-    /// If the emergency shuttle is disabled, this immediately ends the round.
-    /// </remarks>
-    public void DockEmergencyShuttle()
-    {
-        if (EmergencyShuttleArrived)
-            return;
-
-        if (!_emergencyShuttleEnabled)
-        {
-            _roundEnd.EndRound();
-            return;
-        }
-
-        _consoleAccumulator = ConfigManager.GetCVar(CCVars.EmergencyShuttleDockTime);
-        EmergencyShuttleArrived = true;
-
-        var query = AllEntityQuery<StationEmergencyShuttleComponent>();
-
-        var dockResults = new List<ShuttleDockResult>();
-
-        while (query.MoveNext(out var uid, out var comp))
-        {
-            if (DockSingleEmergencyShuttle(uid, comp) is { } dockResult)
-                dockResults.Add(dockResult);
-        }
-
-        if (dockResults.Count == 0)
-        {
-            Log.Warning("Could not find any emergency shuttles to dock. Round will not end via shuttle.");
-            EmergencyShuttleArrived = false;
-            return;
-        }
-
-        // Make the shuttle wait longer if it couldn't dock in the normal spot.
-        // We have to handle the possibility of there being multiple stations, so since the shuttle timer is global,
-        // use the WORST value we have.
-        var worstResult = dockResults.Max(x => x.ResultType);
-        var multiplier = worstResult switch
-        {
-            ShuttleDockResultType.OtherDock => ConfigManager.GetCVar(
-                CCVars.EmergencyShuttleDockTimeMultiplierOtherDock),
-            ShuttleDockResultType.NoDock => ConfigManager.GetCVar(
-                CCVars.EmergencyShuttleDockTimeMultiplierNoDock),
-            // GoodLuck doesn't get a multiplier.
-            // Quite frankly at that point the round is probably so fucked that you'd rather it be over ASAP.
-            _ => 1,
-        };
-
-        _consoleAccumulator *= multiplier;
-
-        foreach (var shuttleDockResult in dockResults)
-        {
-            AnnounceShuttleDock(shuttleDockResult, multiplier > 1);
-        }
-
-        _commsConsole.UpdateCommsConsoleInterface();
     }
 
     private void SetupEmergencyShuttle()
@@ -656,16 +685,19 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     }
 
     /// <summary>
-    /// Returns whether a target is escaping on the emergency shuttle, but only if evac has arrived.
+    /// Returns whether a target is escaping on the emergency shuttle.
     /// </summary>
     public bool IsTargetEscaping(EntityUid target)
     {
-        // if evac isn't here then sitting in a pod doesn't return true
-        if (!EmergencyShuttleArrived)
-            return false;
-
-        // check if target is on an emergency shuttle
         var xform = Transform(target);
+        if (!TryComp<StationMemberComponent>(xform.GridUid, out var member) ||
+            !TryComp<StationEmergencyShuttleComponent>(member.Station, out var stationEvac))
+        {
+            return false;
+        }
+
+        if (!stationEvac.Called)
+            return false;
 
         if (HasComp<EmergencyShuttleComponent>(xform.GridUid))
             return true;

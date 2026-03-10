@@ -17,6 +17,9 @@ public sealed partial class StationEmergencyShuttleComponent : Component
     [DataField, Access(typeof(ShuttleSystem), typeof(EmergencyShuttleSystem), Friend = AccessPermissions.ReadWrite)]
     public EntityUid? EmergencyShuttle;
 
+    [DataField("called")]
+    public bool Called;
+
     /// <summary>
     /// Emergency shuttle map path for this station.
     /// </summary>

@@ -42,7 +42,7 @@ public sealed class HijackShuttleConditionSystem : EntitySystem
             return 0f;
 
         // There no emergency shuttles
-        if (!_emergencyShuttle.EmergencyShuttleArrived)
+        if (!_emergencyShuttle.IsAnyShuttleCalled())
             return 0f;
 
         // Check hijack for each emergency shuttle
