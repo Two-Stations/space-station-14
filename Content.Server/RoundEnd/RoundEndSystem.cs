@@ -247,12 +247,17 @@ namespace Content.Server.RoundEnd
             }
         }
 
-        public void CancelRoundEndCountdown(EntityUid? requester = null, bool forceRecall = false)
+        public void CancelRoundEndCountdown(EntityUid? requester = null, bool forceRecall = false, EntityUid? station = null)
         {
             if (_gameTicker.RunLevel != GameRunLevel.InRound)
                 return;
 
-            if (!forceRecall && (CantRecall || _cooldownTokenSource != null))
+            if (_shuttle.IsAnyShuttleCalled())
+            {
+                _shuttle.RecallShuttle(station);
+            }
+
+            if (!forceRecall && CantRecall)
                 return;
 
             if (_countdownTokenSource == null)

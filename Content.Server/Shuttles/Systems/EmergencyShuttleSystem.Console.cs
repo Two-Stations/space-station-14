@@ -1,4 +1,5 @@
 using System.Threading;
+using Content.Server.RoundEnd;
 using Content.Server.Screens.Components;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Events;
@@ -66,6 +67,8 @@ public sealed partial class EmergencyShuttleSystem
     private float _authorizeTime;
 
     private CancellationTokenSource? _roundEndCancelToken;
+
+    [Dependency] private readonly RoundEndSystem _roundEnd = default!;
 
     private static readonly ProtoId<AccessLevelPrototype> EmergencyRepealAllAccess = "EmergencyShuttleRepealAll";
     private static readonly Color DangerColor = Color.Red;

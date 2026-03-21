@@ -10,7 +10,6 @@ using Content.Server.DeviceNetwork.Systems;
 using Content.Server.GameTicking;
 using Content.Server.GameTicking.Events;
 using Content.Server.Pinpointer;
-using Content.Server.RoundEnd;
 using Content.Server.Screens.Components;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Events;
@@ -34,6 +33,7 @@ using Robust.Server.GameObjects;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Configuration;
 using Robust.Shared.EntitySerialization.Systems;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
@@ -65,7 +65,6 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     [Dependency] private readonly NavMapSystem _navMap = default!;
     [Dependency] private readonly MapLoaderSystem _loader = default!;
     [Dependency] private readonly MetaDataSystem _metaData = default!;
-    [Dependency] private readonly RoundEndSystem _roundEnd = default!;
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly ShuttleSystem _shuttle = default!;
     [Dependency] private readonly StationSystem _station = default!;
@@ -123,7 +122,7 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
     {
         if (!_emergencyShuttleEnabled)
         {
-            _roundEnd.EndRound();
+            _ticker.EndRound();
             return;
         }
 
@@ -192,6 +191,53 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
         }
 
         _commsConsole.UpdateCommsConsoleInterface();
+    }
+
+    public void RecallShuttle(EntityUid? station = null)
+    {
+        var stationsToRecall = new List<EntityUid>();
+
+        if (station != null)
+        {
+            if (_calledStations.Contains(station.Value))
+                stationsToRecall.Add(station.Value);
+        }
+        else
+        {
+            stationsToRecall.AddRange(_calledStations);
+        }
+
+        if (stationsToRecall.Count == 0)
+            return;
+
+        foreach (var stationUid in stationsToRecall)
+        {
+            _calledStations.Remove(stationUid);
+
+            if (!TryComp<StationEmergencyShuttleComponent>(stationUid, out var stationComp) || !stationComp.Called)
+                continue;
+
+            stationComp.Called = false;
+
+            var shuttleEntity = stationComp.EmergencyShuttle;
+            if (shuttleEntity == null ||
+                !TryComp<ShuttleComponent>(shuttleEntity, out var shuttleComp) ||
+                !TryComp<DockingComponent>(shuttleEntity, out var dockComp))
+                continue;
+
+            // FTL back to centcomm
+            if (TryComp<StationCentcommComponent>(stationUid, out var centcommComp) && centcommComp.MapEntity.HasValue)
+            {
+                var homeMap = centcommComp.MapEntity.Value;
+                var homeCoords = new EntityCoordinates(homeMap, _random.NextVector2(100f));
+                _dock.Undock((shuttleEntity.Value, dockComp));
+                _shuttle.FTLToCoordinates(shuttleEntity.Value, shuttleComp, homeCoords, Angle.Zero, hyperspaceTime: 0.1f);
+            }
+        }
+
+        CleanupEmergencyConsole();
+        _commsConsole.UpdateCommsConsoleInterface();
+        UpdateAllEmergencyConsoles();
     }
 
     private void OnCentcommShutdown(EntityUid uid, StationCentcommComponent component, ComponentShutdown args)
@@ -325,8 +371,8 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
             var payload = new NetworkPayload
             {
                 [ShuttleTimerMasks.ShuttleMap] = shuttle,
-                [ShuttleTimerMasks.SourceMap] = _roundEnd.GetCentcomm(),
-                [ShuttleTimerMasks.DestMap] = _roundEnd.GetStation(),
+                [ShuttleTimerMasks.SourceMap] = GetCentcomm(),
+                [ShuttleTimerMasks.DestMap] = GetStation(),
                 [ShuttleTimerMasks.ShuttleTime] = countdownTime,
                 [ShuttleTimerMasks.SourceTime] = countdownTime,
                 [ShuttleTimerMasks.DestTime] = countdownTime,
@@ -473,7 +519,7 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
             {
                 [ShuttleTimerMasks.ShuttleMap] = shuttle,
                 [ShuttleTimerMasks.SourceMap] = targetXform.MapUid,
-                [ShuttleTimerMasks.DestMap] = _roundEnd.GetCentcomm(),
+                [ShuttleTimerMasks.DestMap] = GetCentcomm(),
                 [ShuttleTimerMasks.ShuttleTime] = time,
                 [ShuttleTimerMasks.SourceTime] = time,
                 [ShuttleTimerMasks.DestTime] = time + TimeSpan.FromSeconds(TransitTime),
@@ -711,6 +757,28 @@ public sealed partial class EmergencyShuttleSystem : SharedEmergencyShuttleSyste
             return false;
 
         return _transformSystem.GetWorldMatrix(shuttleXform).TransformBox(grid.LocalAABB).Contains(_transformSystem.GetWorldPosition(xform));
+    }
+    
+    /// <summary>
+    ///     Attempts to get the MapUid of the station using <see cref="StationSystem.GetLargestGrid"/>
+    /// </summary>
+    private EntityUid? GetStation()
+    {
+        AllEntityQuery<StationEmergencyShuttleComponent, StationDataComponent>().MoveNext(out var uid, out _, out var data);
+        if (data == null)
+            return null;
+        var targetGrid = _station.GetLargestGrid((uid, data));
+        return targetGrid == null ? null : Transform(targetGrid.Value).MapUid;
+    }
+
+    /// <summary>
+    ///     Attempts to get centcomm's MapUid
+    /// </summary>
+    private EntityUid? GetCentcomm()
+    {
+        AllEntityQuery<StationCentcommComponent>().MoveNext(out var _, out var centcomm);
+
+        return centcomm == null ? null : centcomm.MapEntity;
     }
 
     /// <summary>

@@ -45,7 +45,7 @@ public sealed class CallEmergencyShuttleCommand : IConsoleCommand
         if (args.Length < 2)
         {
             // Call for all stations
-            roundEndSystem.RequestRoundEnd(time, station: null);
+            roundEndSystem.RequestRoundEnd(time, shell.Player?.AttachedEntity, checkCooldown: false, station: null);
             shell.WriteLine("Emergency shuttle called for all stations.");
             return;
         }
@@ -56,7 +56,7 @@ public sealed class CallEmergencyShuttleCommand : IConsoleCommand
             return;
         }
 
-        roundEndSystem.RequestRoundEnd(time, station: stationUid);
+        roundEndSystem.RequestRoundEnd(time, shell.Player?.AttachedEntity, checkCooldown: false, station: stationUid);
         shell.WriteLine($"Emergency shuttle called for station {stationUid}.");
     }
 
