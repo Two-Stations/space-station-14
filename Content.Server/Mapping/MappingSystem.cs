@@ -48,9 +48,9 @@ public sealed class MappingSystem : EntitySystem
 
     private void SetAutosaveEnabled(bool b)
     {
-        if (!b)
-            _currentlyAutosaving.Clear();
-        _autosaveEnabled = b;
+        // User requested to disable autosave due to crashes.
+        _autosaveEnabled = false;
+        _currentlyAutosaving.Clear();
     }
 
     public override void Update(float frameTime)
@@ -73,10 +73,14 @@ public sealed class MappingSystem : EntitySystem
             }
 
             _currentlyAutosaving[uid] = (CalculateNextTime(), name);
-            var saveDir = Path.Combine(_cfg.GetCVar(CCVars.AutosaveDirectory), name).Replace(Path.DirectorySeparatorChar, '/');
-            _resMan.UserData.CreateDir(new ResPath(saveDir).ToRootedPath());
 
-            var path = new ResPath(Path.Combine(saveDir, $"{DateTime.Now:yyyy-M-dd_HH.mm.ss}-AUTO.yml"));
+            var autosaveDir = _cfg.GetCVar(CCVars.AutosaveDirectory).Replace('\\', '/');
+            var mapName = name.Replace('\\', '/');
+            var mapSaveDir = new ResPath(autosaveDir) / mapName;
+            _resMan.UserData.CreateDir(mapSaveDir);
+
+            var timestampFile = $"{DateTime.Now:yyyy-M-dd_HH.mm.ss}-AUTO.yml";
+            var path = mapSaveDir / timestampFile;
             Log.Info($"Autosaving map {name} ({uid}) to {path}. Next save in {ReadableTimeLeft(uid)} seconds.");
 
             if (HasComp<MapComponent>(uid))

@@ -110,3 +110,13 @@
   canBuildInImpassable: true
   conditions:
     - !type:WallmountCondition
+
+- type: construction
+  id: RadioLighthouse
+  name: радиомаяк
+  graph: RadioLighthouse
+  startNode: start
+  targetNode: radiolighthouse
+  category: construction-category-machines
+  placementMode: SnapgridCenter
+  canBuildInImpassable: false

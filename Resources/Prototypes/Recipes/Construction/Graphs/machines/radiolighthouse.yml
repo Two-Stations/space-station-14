@@ -1,0 +1,27 @@
+- type: constructionGraph
+  id: RadioLighthouse
+  start: start
+  graph:
+    - node: start
+      actions:
+        - !type:SpawnPrototype
+          prototype: SheetSteel1
+        - !type:DeleteEntity
+      edges:
+        - to: radiolighthouse
+          steps:
+            - material: Steel
+              amount: 1
+              doAfter: 2.5
+    - node: radiolighthouse
+      entity: RadioLighthouse
+      edges:
+        - to: start
+          steps:
+            - tool: Screwing
+              doAfter: 1
+          completed:
+            - !type:SpawnPrototype
+              prototype: SheetSteel1
+              amount: 1
+            - !type:DeleteEntity

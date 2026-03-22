@@ -1,0 +1,44 @@
+- type: entity
+  parent: [ BaseMachinePowered, ConstructibleMachine ]
+  id: RadioLighthouse
+  name: радиомаяк
+  description: Просто радиомаяк. Eго можно разместить.
+  components:
+  - type: Sprite
+    sprite: Structures/Machines/radiolighthouse.rsi
+    snapCardinals: true
+    layers:
+    - state: telecom-nopower
+    - state: telecom-stripe
+    - state: telecom-on
+      shader: unshaded
+      visible: false
+  - type: Physics
+    bodyType: Static
+  - type: Fixtures
+    fixtures:
+      fix1:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.4,-0.4,0.4,0.4"
+        density: 190
+        mask:
+        - MachineMask
+        layer:
+        - MachineLayer
+  - type: Destructible
+    thresholds:
+    - trigger:
+        !type:DamageTrigger
+        damage: 100
+      behaviors:
+      - !type:PlaySoundBehavior
+        sound:
+          collection: MetalBreak
+      - !type:ChangeConstructionNodeBehavior
+        node: machineFrame
+      - !type:DoActsBehavior
+        acts: ["Destruction"]
+  - type: Transform
+    anchored: true
+  - type: Pullable
