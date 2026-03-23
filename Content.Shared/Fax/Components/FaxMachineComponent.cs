@@ -89,7 +89,7 @@ public sealed partial class FaxMachineComponent : Component
     /// Known faxes in network by address with fax names
     /// </summary>
     [ViewVariables]
-    public Dictionary<string, string> KnownFaxes { get; } = new();
+    public Dictionary<string, FaxInfo> KnownFaxes { get; } = new();
 
     /// <summary>
     /// Print queue of the incoming message

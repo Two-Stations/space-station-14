@@ -79,6 +79,7 @@
   name: CentComm long range fax machine
   suffix: CentCom
   components:
+  - type: CentcomFax
   - type: Sprite
     layers:
       - state: icon

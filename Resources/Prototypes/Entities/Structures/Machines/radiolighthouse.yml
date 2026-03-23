@@ -42,3 +42,6 @@
   - type: Transform
     anchored: true
   - type: Pullable
+  - type: Beacon
+  - type: ApcPowerReceiver
+    powerLoad: 200

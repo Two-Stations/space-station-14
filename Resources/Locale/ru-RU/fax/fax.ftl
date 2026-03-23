@@ -20,5 +20,9 @@ fax-machine-ui-from = Отправитель:
 fax-machine-ui-paper = Бумага:
 fax-machine-ui-paper-inserted = Бумага в лотке
 fax-machine-ui-paper-not-inserted = Нет бумаги
+
+fax-machine-ui-station-unknown = Неизвестно
+fax-machine-ui-station-centcomm = Центком
+
 fax-machine-chat-notify = Получено новое сообщение с "{ $fax }" факса
 fax-machine-printed-paper-name = распечатанная бумага

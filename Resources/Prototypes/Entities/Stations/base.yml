@@ -53,6 +53,12 @@
       path: /Maps/Shuttles/cargo.yml
     - type: GridSpawn
       groups:
+        lighthouse: !type:GridSpawnGroup
+          minimumDistance: 400
+          maximumDistance: 600
+          stationGrid: false
+          paths:
+            - /Maps/Misc/radiolighthouse.yml
         trade: !type:GridSpawnGroup
           addComponents:
             - type: ProtectedGrid

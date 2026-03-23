@@ -139,7 +139,36 @@ public sealed partial class ShuttleSystem
         if (_loader.TryLoadGrid(mapId, path, out var grid))
         {
             if (HasComp<ShuttleComponent>(grid))
-                TryFTLProximity(grid.Value, targetGrid);
+            {
+                // Begin-Modification: Special handling for radiolighthouse
+                if (path.ToString().EndsWith("/radiolighthouse.yml"))
+                {
+                    var targetGridComp = Comp<MapGridComponent>(targetGrid);
+                    var shuttleGridComp = Comp<MapGridComponent>(grid.Value);
+                    var targetXform = Transform(targetGrid);
+
+                    // Use the larger of the two grids' AABBs as a base padding
+                    var distancePadding = (MathF.Max(targetGridComp.LocalAABB.Width, targetGridComp.LocalAABB.Height) +
+                                           MathF.Max(shuttleGridComp.LocalAABB.Width, shuttleGridComp.LocalAABB.Height)) / 2f;
+
+                    var angle = _random.NextAngle();
+                    var distance = _random.NextFloat(group.MinimumDistance, group.MaximumDistance);
+
+                    var relativePos = angle.ToVec() * (distancePadding + distance);
+
+                    var newWorldPos = targetXform.WorldPosition + relativePos;
+                    var targetMapId = targetXform.MapID;
+                    var targetCoords = new MapCoordinates(newWorldPos, targetMapId);
+
+                    _transform.SetMapCoordinates(grid.Value, targetCoords);
+                    _transform.SetWorldRotation(grid.Value, _random.NextAngle());
+                }
+                else
+                {
+                    TryFTLProximity(grid.Value, targetGrid);
+                }
+                // End-Modification
+            }
 
             if (group.NameGrid)
             {

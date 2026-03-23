@@ -1,9 +1,12 @@
 using Content.Server.Administration;
 using Content.Server.Administration.Managers;
+using Content.Server.Beacon;
 using Content.Server.Chat.Managers;
 using Content.Server.DeviceNetwork.Systems;
 using Content.Server.Popups;
 using Content.Server.Power.Components;
+using Content.Server.Station.Systems;
+using Content.Server.Shuttles.Components;
 using Content.Server.Tools;
 using Content.Shared.Administration.Logs;
 using Content.Shared.Containers.ItemSlots;
@@ -30,6 +33,7 @@ using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
+using System.Linq;
 
 namespace Content.Server.Fax;
 
@@ -51,6 +55,8 @@ public sealed class FaxSystem : EntitySystem
     [Dependency] private readonly MetaDataSystem _metaData = default!;
     [Dependency] private readonly FaxecuteSystem _faxecute = default!;
     [Dependency] private readonly EmagSystem _emag = default!;
+    [Dependency] private readonly BeaconSystem _beacon = default!;
+    [Dependency] private readonly StationSystem _station = default!;
 
     private static readonly ProtoId<ToolQualityPrototype> ScrewingQuality = "Screwing";
 
@@ -230,7 +236,7 @@ public sealed class FaxSystem : EntitySystem
                 return;
             }
 
-            if (component.KnownFaxes.ContainsValue(newName) && !_emag.CheckFlag(uid, EmagType.Interaction)) // Allow existing names if emagged for fun
+            if (component.KnownFaxes.Any(f => f.Value.Name == newName) && !_emag.CheckFlag(uid, EmagType.Interaction)) // Allow existing names if emagged for fun
             {
                 _popupSystem.PopupEntity(Loc.GetString("fax-machine-popup-name-exist"), uid);
                 return;
@@ -276,7 +282,9 @@ public sealed class FaxSystem : EntitySystem
                     var payload = new NetworkPayload()
                     {
                         { DeviceNetworkConstants.Command, FaxConstants.FaxPongCommand },
-                        { FaxConstants.FaxNameData, component.FaxName }
+                        { FaxConstants.FaxNameData, component.FaxName },
+                        { FaxConstants.FaxStationId, _station.GetOwningStation(uid) },
+                        { FaxConstants.FaxCentcomData, HasComp<CentcomFaxComponent>(uid) }
                     };
                     _deviceNetworkSystem.QueuePacket(uid, args.SenderAddress, payload);
 
@@ -284,8 +292,10 @@ public sealed class FaxSystem : EntitySystem
                 case FaxConstants.FaxPongCommand:
                     if (!args.Data.TryGetValue(FaxConstants.FaxNameData, out string? faxName))
                         return;
+                    args.Data.TryGetValue(FaxConstants.FaxStationId, out EntityUid? stationId);
+                    args.Data.TryGetValue(FaxConstants.FaxCentcomData, out bool isCentcom);
 
-                    component.KnownFaxes[args.SenderAddress] = faxName;
+                    component.KnownFaxes[args.SenderAddress] = new FaxInfo(faxName, isCentcom, stationId);
 
                     UpdateUserInterface(uid, component);
 
@@ -379,7 +389,54 @@ public sealed class FaxSystem : EntitySystem
         var canCopy = isPaperInserted &&
                       component.SendTimeoutRemaining <= 0 &&
                       component.InsertingTimeRemaining <= 0;
-        var state = new FaxUiState(component.FaxName, component.KnownFaxes, canSend, canCopy, isPaperInserted, component.DestinationFaxAddress);
+
+        // Group faxes by station
+        var groupedFaxes = new Dictionary<EntityUid, List<KeyValuePair<string, FaxInfo>>>();
+        var homeStation = _station.GetOwningStation(uid);
+
+        // First, add a placeholder for the home station to ensure it appears first
+        if (homeStation.HasValue && !groupedFaxes.ContainsKey(homeStation.Value))
+        {
+            groupedFaxes[homeStation.Value] = new List<KeyValuePair<string, FaxInfo>>();
+        }
+
+        foreach (var (address, info) in component.KnownFaxes)
+        {
+            var station = info.Station ?? EntityUid.Invalid;
+
+            if (!groupedFaxes.TryGetValue(station, out var list))
+            {
+                list = new List<KeyValuePair<string, FaxInfo>>();
+                groupedFaxes[station] = list;
+            }
+            list.Add(new KeyValuePair<string, FaxInfo>(address, info));
+        }
+
+        var stationGroups = new List<FaxStationGroup>();
+        foreach (var (stationId, faxList) in groupedFaxes.OrderBy(g => g.Key != homeStation).ThenBy(g => !g.Key.IsValid()))
+        {
+            var stationName = Loc.GetString("fax-machine-ui-station-unknown");
+            if (stationId.IsValid())
+            {
+                stationName = Name(stationId);
+            }
+            else
+            {
+                // Check if any fax in this group is a Centcomm fax. If so, name the group "Centcomm".
+                if (faxList.Any(f => f.Value.IsCentcom))
+                    stationName = Loc.GetString("fax-machine-ui-station-centcomm");
+            }
+
+            var peers = faxList.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new FaxUiPeerInfo(kvp.Value.Name)
+            );
+
+            if (peers.Count > 0)
+                stationGroups.Add(new FaxStationGroup(stationName, peers));
+        }
+
+        var state = new FaxUiState(component.FaxName, stationGroups, canSend, canCopy, isPaperInserted, component.DestinationFaxAddress);
         _userInterface.SetUiState(uid, FaxUiKey.Key, state);
     }
 
@@ -510,8 +567,33 @@ public sealed class FaxSystem : EntitySystem
         if (component.DestinationFaxAddress == null)
             return;
 
-        if (!component.KnownFaxes.TryGetValue(component.DestinationFaxAddress, out var faxName))
+        if (!component.KnownFaxes.TryGetValue(component.DestinationFaxAddress, out var faxInfo))
             return;
+
+        // Beacon check
+        var sourceIsCentcomm = HasComp<CentcomFaxComponent>(uid);
+        var destIsCentcomm = faxInfo.IsCentcom;
+
+        // if both are centcomm, or it's the same station, skip beacon checks.
+        var sourceStation = _station.GetOwningStation(uid);
+        var isIntraStation = sourceStation.HasValue && faxInfo.Station.HasValue && sourceStation.Value == faxInfo.Station.Value;
+
+        if (!(isIntraStation || (sourceIsCentcomm && destIsCentcomm)))
+        {
+            // Check sender beacon
+            if (!sourceIsCentcomm && !_beacon.IsBeaconActive(uid))
+            {
+                _popupSystem.PopupEntity(Loc.GetString("fax-machine-popup-no-beacon"), uid);
+                return;
+            }
+
+            // Check receiver beacon
+            if (!destIsCentcomm && (!faxInfo.Station.HasValue || !_beacon.IsBeaconActive(faxInfo.Station.Value)))
+            {
+                _popupSystem.PopupEntity(Loc.GetString("fax-machine-popup-no-recipient-beacon"), uid);
+                return;
+            }
+        }
 
         if (!TryComp(sendEntity, out MetaDataComponent? metadata) ||
            !TryComp<PaperComponent>(sendEntity, out var paper))
@@ -551,7 +633,7 @@ public sealed class FaxSystem : EntitySystem
             LogImpact.Low,
             $"{ToPrettyString(args.Actor):actor} " +
             $"sent fax from \"{component.FaxName}\" {ToPrettyString(uid):tool} " +
-            $"to \"{faxName}\" ({component.DestinationFaxAddress}) " +
+            $"to \"{faxInfo.Name}\" ({component.DestinationFaxAddress}) " +
             $"of {ToPrettyString(sendEntity):subject}: {paper.Content}");
 
         component.SendTimeoutRemaining += component.SendTimeout;
@@ -572,7 +654,7 @@ public sealed class FaxSystem : EntitySystem
 
         var faxName = Loc.GetString("fax-machine-popup-source-unknown");
         if (fromAddress != null && component.KnownFaxes.TryGetValue(fromAddress, out var fax)) // If message received from unknown fax address
-            faxName = fax;
+            faxName = fax.Name;
 
         _popupSystem.PopupEntity(Loc.GetString("fax-machine-popup-received", ("from", faxName)), uid);
         _appearanceSystem.SetData(uid, FaxMachineVisuals.VisualState, FaxMachineVisualState.Printing);
@@ -622,6 +704,6 @@ public sealed class FaxSystem : EntitySystem
     private void NotifyAdmins(string faxName)
     {
         _chat.SendAdminAnnouncement(Loc.GetString("fax-machine-chat-notify", ("fax", faxName)));
-        _audioSystem.PlayGlobal("/Audio/Machines/high_tech_confirm.ogg", Filter.Empty().AddPlayers(_adminManager.ActiveAdmins), false, AudioParams.Default.WithVolume(-8f));
+        _audioSystem.PlayGlobal(new SoundPathSpecifier("/Audio/Machines/high_tech_confirm.ogg"), Filter.Empty().AddPlayers(_adminManager.ActiveAdmins), false, AudioParams.Default.WithVolume(-8f));
     }
 }

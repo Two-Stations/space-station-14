@@ -51,35 +51,43 @@ public sealed partial class FaxWindow : DefaultWindow
             PaperStatusLabel.Text = Loc.GetString("fax-machine-ui-paper-not-inserted");
         }
 
-        if (state.AvailablePeers.Count == 0)
-        {
-            PeerSelector.AddItem(Loc.GetString("fax-machine-ui-no-peers"));
-            PeerSelector.Disabled = true;
-        }
+        var allPeers = state.StationGroups.SelectMany(g => g.Peers).ToList();
 
-        if (PeerSelector.Disabled && state.AvailablePeers.Count != 0)
+        if (allPeers.Count == 0)
         {
             PeerSelector.Clear();
-            PeerSelector.Disabled = false;
-        }
-
-        // always must be selected destination
-        if (string.IsNullOrEmpty(state.DestinationAddress) && state.AvailablePeers.Count != 0)
-        {
-            PeerSelected?.Invoke(state.AvailablePeers.First().Key);
+            PeerSelector.AddItem(Loc.GetString("fax-machine-ui-no-peers"));
+            PeerSelector.Disabled = true;
             return;
         }
 
-        if (state.AvailablePeers.Count != 0)
-        {
-            PeerSelector.Clear();
+        PeerSelector.Disabled = false;
+        PeerSelector.Clear();
 
-            foreach (var (address, name) in state.AvailablePeers)
+        var selectedId = -1;
+
+        foreach (var group in state.StationGroups)
+        {
+            // Add a non-selectable header for the station
+            PeerSelector.AddItem(group.StationName);
+            PeerSelector.SetItemDisabled(PeerSelector.ItemCount - 1, true);
+
+            foreach (var (address, faxInfo) in group.Peers)
             {
-                var id = AddPeerSelect(name, address);
+                var id = AddPeerSelect(faxInfo.Name, address);
                 if (address == state.DestinationAddress)
-                    PeerSelector.Select(id);
+                    selectedId = id;
             }
+        }
+
+        if (selectedId != -1)
+        {
+            PeerSelector.Select(selectedId);
+        }
+        // If no destination is selected, select the first available peer
+        else if (allPeers.Count > 0)
+        {
+            PeerSelected?.Invoke(allPeers.First().Key);
         }
     }
 

@@ -2,6 +2,26 @@ using Robust.Shared.Serialization;
 
 namespace Content.Shared.Fax;
 
+public static class FaxConstants
+{
+    public const string FaxPingCommand = "FaxPing";
+    public const string FaxPongCommand = "FaxPong";
+    public const string FaxPrintCommand = "FaxPrint";
+
+    public const string FaxNameData = "FaxName";
+    public const string FaxStationId = "FaxStation";
+    public const string FaxCentcomData = "FaxCentcom";
+    public const string FaxSyndicateData = "FaxSyndicate";
+
+    public const string FaxPaperNameData = "FaxPaperName";
+    public const string FaxPaperLabelData = "FaxPaperLabel";
+    public const string FaxPaperContentData = "FaxPaperContent";
+    public const string FaxPaperStampStateData = "FaxPaperStampState";
+    public const string FaxPaperStampedByData = "FaxPaperStampedBy";
+    public const string FaxPaperPrototypeData = "FaxPaperPrototype";
+    public const string FaxPaperLockedData = "FaxPaperLocked";
+}
+
 [Serializable, NetSerializable]
 public enum FaxUiKey : byte
 {
@@ -12,25 +32,38 @@ public enum FaxUiKey : byte
 public sealed class FaxUiState : BoundUserInterfaceState
 {
     public string DeviceName { get; }
-    public Dictionary<string, string> AvailablePeers { get; }
+    public List<FaxStationGroup> StationGroups { get; }
     public string? DestinationAddress { get; }
     public bool IsPaperInserted { get; }
     public bool CanSend { get; }
     public bool CanCopy { get; }
 
     public FaxUiState(string deviceName,
-        Dictionary<string, string> peers,
+        List<FaxStationGroup> stationGroups,
         bool canSend,
         bool canCopy,
         bool isPaperInserted,
         string? destAddress)
     {
         DeviceName = deviceName;
-        AvailablePeers = peers;
+        StationGroups = stationGroups;
         IsPaperInserted = isPaperInserted;
         CanSend = canSend;
         CanCopy = canCopy;
         DestinationAddress = destAddress;
+    }
+}
+
+[Serializable, NetSerializable]
+public sealed class FaxStationGroup
+{
+    public string StationName { get; }
+    public Dictionary<string, FaxUiPeerInfo> Peers { get; }
+
+    public FaxStationGroup(string stationName, Dictionary<string, FaxUiPeerInfo> peers)
+    {
+        StationName = stationName;
+        Peers = peers;
     }
 }
 
