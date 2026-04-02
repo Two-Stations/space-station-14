@@ -28,6 +28,7 @@ using Content.Shared.Stunnable;
 using Content.Shared.Zombies;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
+using Content.Server.Station.Components;
 using Content.Shared.Cuffs.Components;
 using Robust.Shared.Player;
 
@@ -39,7 +40,6 @@ namespace Content.Server.GameTicking.Rules;
 public sealed class RevolutionaryRuleSystem : GameRuleSystem<RevolutionaryRuleComponent>
 {
     [Dependency] private readonly AntagSelectionSystem _antag = default!;
-    [Dependency] private readonly EmergencyShuttleSystem _emergencyShuttle = default!;
     [Dependency] private readonly EuiManager _euiMan = default!;
     [Dependency] private readonly IAdminLogManager _adminLogManager = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
@@ -267,6 +267,18 @@ public sealed class RevolutionaryRuleSystem : GameRuleSystem<RevolutionaryRuleCo
     {
         var gone = 0;
 
+        var shuttleCalled = false;
+        var query = AllEntityQuery<StationEmergencyStateComponent>();
+        while(query.MoveNext(out var comp))
+        {
+            if (comp.Status > EmergencyShuttleStatus.Uncalled)
+            {
+                shuttleCalled = true;
+                break;
+            }
+        }
+
+
         foreach (var entity in list)
         {
             if (TryComp<CuffableComponent>(entity, out var cuffed) && cuffed.CuffedHandCount > 0 && countCuffed)
@@ -283,7 +295,7 @@ public sealed class RevolutionaryRuleSystem : GameRuleSystem<RevolutionaryRuleCo
                     continue;
                 }
 
-                if (checkOffStation && _stationSystem.GetOwningStation(entity) == null && !_emergencyShuttle.EmergencyShuttleArrived)
+                if (checkOffStation && _stationSystem.GetOwningStation(entity) == null && !shuttleCalled)
                 {
                     gone++;
                     continue;

@@ -2,10 +2,12 @@ using Content.Server.Antag;
 using Content.Server.GameTicking.Rules.Components;
 using Content.Server.Mind;
 using Content.Server.Roles;
-using Content.Server.Shuttles.Systems;
 using Content.Shared.GameTicking.Components;
 using Content.Shared.Mind;
 using Content.Shared.Mobs.Systems;
+using Content.Shared.Roles;
+using Robust.Shared.Random;
+using Content.Server.Shuttles.Components;
 using Content.Shared.Roles.Components;
 using Content.Shared.Survivor.Components;
 using Content.Shared.Tag;
@@ -20,7 +22,6 @@ public sealed class SurvivorRuleSystem : GameRuleSystem<SurvivorRuleComponent>
     [Dependency] private readonly MindSystem _mind = default!;
     [Dependency] private readonly AntagSelectionSystem _antag = default!;
     [Dependency] private readonly TransformSystem _xform = default!;
-    [Dependency] private readonly EmergencyShuttleSystem _eShuttle = default!;
     [Dependency] private readonly TagSystem _tag = default!;
     [Dependency] private readonly MobStateSystem _mobState = default!;
 
@@ -75,7 +76,14 @@ public sealed class SurvivorRuleSystem : GameRuleSystem<SurvivorRuleComponent>
         var deadSurvivors = 0;
         var aliveMarooned = 0;
         var aliveOnShuttle = 0;
-        var eShuttle = _eShuttle.GetShuttle();
+        var shuttles = new List<EntityUid>();
+        var stationQuery = AllEntityQuery<StationEmergencyShuttleComponent>();
+        while (stationQuery.MoveNext(out var station, out var stationComp))
+        {
+            if (stationComp.EmergencyShuttle != null)
+                shuttles.Add(stationComp.EmergencyShuttle.Value);
+        }
+
 
         while (existingSurvivors.MoveNext(out _, out _, out var mindComp))
         {
@@ -94,7 +102,17 @@ public sealed class SurvivorRuleSystem : GameRuleSystem<SurvivorRuleComponent>
                 continue;
             }
 
-            if (eShuttle != null && eShuttle.Value.IsValid() && (Transform(eShuttle.Value).MapID == _xform.GetMapCoordinates(survivor).MapId))
+            var onShuttle = false;
+            foreach (var shuttle in shuttles)
+            {
+                if (shuttle.IsValid() && (Transform(shuttle).MapID == _xform.GetMapCoordinates(survivor).MapId))
+                {
+                    onShuttle = true;
+                    break;
+                }
+            }
+
+            if (onShuttle)
             {
                 aliveOnShuttle++;
                 continue;

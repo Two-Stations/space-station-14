@@ -1,7 +1,7 @@
 <controls:FancyWindow xmlns="https://spacestation14.io"
     xmlns:controls="clr-namespace:Content.Client.UserInterface.Controls"
     Title="{Loc 'comms-console-menu-title'}"
-    MinSize="400 300">
+    MinSize="450 350">
 
     <!-- Main Container -->
     <BoxContainer Orientation="Vertical"
@@ -16,9 +16,19 @@
             HorizontalAlignment="Stretch"
             MinHeight="100"/>
 
+        <ScrollContainer
+            VerticalExpand="True"
+            HScrollEnabled="False">
+            <BoxContainer
+                Name="StationList"
+                Access="Public"
+                Orientation="Vertical"/>
+        </ScrollContainer>
+
         <!-- ButtonsPart -->
         <BoxContainer Orientation="Vertical"
             VerticalAlignment="Bottom"
+            Margin="0 8 0 0"
             SeparationOverride="4">
 
             <!-- AnnouncePart -->
@@ -53,7 +63,7 @@
                 <RichTextLabel Name="CountdownLabel"/>
 
                 <Button Name="EmergencyShuttleButton"
-                    Access="Public" 
+                    Access="Public"
                     Text="Placeholder Text"
                     ToolTip="{Loc 'comms-console-menu-emergency-shuttle-button-tooltip'}"/>
             </BoxContainer>

@@ -129,6 +129,7 @@ public sealed partial class StationSystem : SharedStationSystem
         }
 
         RaiseNetworkEvent(new StationsUpdatedEvent(GetStationNames()), Filter.Broadcast());
+        RaiseLocalEvent(new StationRemovedEvent(uid));
     }
 
     private void OnPostGameMapLoad(PostGameMapLoad ev)
@@ -511,6 +512,19 @@ public sealed class StationRenamedEvent : EntityEventArgs
     {
         OldName = oldName;
         NewName = newName;
+    }
+}
+
+/// <summary>
+/// Event raised when a station is removed.
+/// </summary>
+public sealed class StationRemovedEvent : EntityEventArgs
+{
+    public readonly EntityUid Station;
+
+    public StationRemovedEvent(EntityUid station)
+    {
+        Station = station;
     }
 }
 

@@ -1,5 +1,6 @@
+using Content.Shared.Station.Components;
+using System.Linq;
 using Content.Server.RoundEnd;
-using Content.Server.Shuttles.Systems;
 using Content.Shared.Administration;
 using Content.Shared.Localizations;
 using Robust.Shared.Console;
@@ -8,50 +9,53 @@ using Robust.Shared.GameObjects;
 namespace Content.Server.Administration.Commands
 {
     [AdminCommand(AdminFlags.Round)]
-    public sealed class CallShuttleCommand : LocalizedEntityCommands
+    public sealed class RecallEvacCommand : LocalizedEntityCommands
     {
         [Dependency] private readonly RoundEndSystem _roundEndSystem = default!;
 
-        public override string Command => "callshuttle";
+        public override string Command => "recallevac";
 
-        public override string Help => Loc.GetString("cmd-callshuttle-help");
+        public override string Description => "Recalls the emergency shuttle for a specific station, or all of them.";
+
+        public override string Help => "recallevac [<stationUid>]";
 
         public override void Execute(IConsoleShell shell, string argStr, string[] args)
         {
-            if (args.Length == 0 || args.Length > 2)
+            if (args.Length > 1)
             {
                 shell.WriteLine(Help);
                 return;
             }
 
-            if (!TimeSpan.TryParseExact(args[0], ContentLocalizationManager.TimeSpanMinutesFormats,
-                    LocalizationManager.DefaultCulture, out var time))
+            if (args.Length == 0)
             {
-                shell.WriteLine(Loc.GetString("shell-timespan-minutes-must-be-correct"));
+                _roundEndSystem.CancelRoundEndCountdown(shell.Player?.AttachedEntity, false, null);
+                shell.WriteLine("Recalled all emergency shuttles.");
                 return;
             }
 
-            EntityUid? station = null;
-            if (args.Length > 1 && NetEntity.TryParse(args[1], out var stationNet) &&
-                EntityManager.TryGetEntity(stationNet, out var stationUid))
+            if (!NetEntity.TryParse(args[0], out var stationNet) || !EntityManager.TryGetEntity(stationNet, out var stationUid))
             {
-                station = stationUid;
+                shell.WriteLine($"Invalid station UID: {args[0]}");
+                return;
             }
 
-            _roundEndSystem.RequestRoundEnd(time, shell.Player?.AttachedEntity, false, station: station);
+            _roundEndSystem.CancelRoundEndCountdown(shell.Player?.AttachedEntity, false, stationUid);
+            shell.WriteLine($"Attempted to recall shuttle for station {EntityManager.ToPrettyString(stationUid.Value)}.");
         }
-    }
 
-    [AdminCommand(AdminFlags.Round)]
-    public sealed class RecallShuttleCommand : LocalizedEntityCommands
-    {
-        [Dependency] private readonly RoundEndSystem _roundEndSystem = default!;
-
-        public override string Command => "recallshuttle";
-
-        public override void Execute(IConsoleShell shell, string argStr, string[] args)
+        public override CompletionResult GetCompletion(IConsoleShell shell, string[] args)
         {
-            _roundEndSystem.CancelRoundEndCountdown(shell.Player?.AttachedEntity, forceRecall: true);
+            if (args.Length == 1)
+            {
+                var stations = _roundEndSystem.GetStationsWithActiveCountdown()
+                    .Select(s => new CompletionOption(EntityManager.GetNetEntity(s).ToString(), EntityManager.ToPrettyString(s)))
+                    .ToList();
+                return CompletionResult.FromHintOptions(stations, "<station>");
+            }
+
+            return CompletionResult.Empty;
         }
     }
 }
+

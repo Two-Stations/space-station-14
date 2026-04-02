@@ -17,6 +17,19 @@ public sealed class LaunchEmergencyShuttleCommand : LocalizedEntityCommands
 
     public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        _shuttleSystem.EarlyLaunch();
+        if (args.Length != 1)
+        {
+            shell.WriteLine("Usage: launchemergencyshuttle <station uid>");
+            return;
+        }
+
+        if (!NetEntity.TryParse(args[0], out var stationNet) ||
+            !EntityManager.TryGetEntity(stationNet, out var stationUid))
+        {
+            shell.WriteLine("Invalid station uid.");
+            return;
+        }
+
+        _shuttleSystem.LaunchShuttle(stationUid.Value);
     }
 }

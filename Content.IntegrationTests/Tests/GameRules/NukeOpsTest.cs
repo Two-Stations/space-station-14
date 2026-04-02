@@ -256,7 +256,7 @@ public sealed class NukeOpsTest
             // Delete the last nukie and make sure the round ends.
             entMan.DeleteEntity(nukies[^1]);
 
-            Assert.That(roundEndSys.IsRoundEndRequested,
+            Assert.That(roundEndSys.IsRoundEndRequested(),
                 "All nukies were deleted, but the round didn't end!");
         });
 

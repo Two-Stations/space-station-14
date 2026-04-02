@@ -18,6 +18,7 @@ entities:
       parent: invalid
     - type: ProtectedGrid
     - type: EscapePod
+    - type: Docking
     - type: MapGrid
       chunks:
         -1,-1:

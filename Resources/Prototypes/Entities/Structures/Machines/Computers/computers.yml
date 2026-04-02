@@ -757,6 +757,7 @@
   name: central command communications computer
   description: A computer used to make world wide announcements via keyboard. The superior cousin of the regular communications computer.
   components:
+  - type: CentralCommandConsole
   - type: Sprite
     layers:
     - map: ["computerLayerBody"]

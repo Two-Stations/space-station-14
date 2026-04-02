@@ -9,6 +9,8 @@ using Content.Shared.Mobs.Systems;
 using Content.Shared.Objectives.Components;
 using Content.Shared.Roles;
 using Robust.Shared.Player;
+using Content.Server.Station.Components;
+using System.Linq;
 
 namespace Content.Server.Objectives.Systems;
 
@@ -41,8 +43,19 @@ public sealed class HijackShuttleConditionSystem : EntitySystem
         if (TryComp<CuffableComponent>(mind.OwnedEntity, out var cuffed) && cuffed.CuffedHandCount > 0)
             return 0f;
 
+        var shuttleCalled = false;
+        var query = AllEntityQuery<StationEmergencyStateComponent>();
+        while(query.MoveNext(out var stationComp))
+        {
+            if (stationComp.Status > EmergencyShuttleStatus.Uncalled)
+            {
+                shuttleCalled = true;
+                break;
+            }
+        }
+
         // There no emergency shuttles
-        if (!_emergencyShuttle.IsAnyShuttleCalled())
+        if (!shuttleCalled)
             return 0f;
 
         // Check hijack for each emergency shuttle

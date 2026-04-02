@@ -7,6 +7,7 @@ using Content.Shared.Shuttles.Components;
 using Content.Shared.Station.Components;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map.Components;
+using Content.Server.Station.Components;
 
 namespace Content.IntegrationTests.Tests.Station;
 
@@ -89,8 +90,9 @@ public sealed class EvacShuttleTest
         // Set up shuttle timing
         var shuttleSys = server.System<ShuttleSystem>();
         var evacSys = server.System<EmergencyShuttleSystem>();
-        evacSys.TransitTime = shuttleSys.DefaultTravelTime; // Absolute minimum transit time, so the test has to run for at least this long
-        // TODO SHUTTLE fix spaghetti
+
+        var stationState = entMan.GetComponent<StationEmergencyStateComponent>(station);
+        stationState.TransitTime = shuttleSys.DefaultTravelTime; // Absolute minimum transit time, so the test has to run for at least this long
 
         var dockTime = server.CfgMan.GetCVar(CCVars.EmergencyShuttleDockTime);
         server.CfgMan.SetCVar(CCVars.EmergencyShuttleDockTime, 2);

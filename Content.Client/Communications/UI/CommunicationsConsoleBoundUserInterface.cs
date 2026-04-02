@@ -1,9 +1,10 @@
-﻿using Content.Shared.CCVar;
+using Content.Shared.CCVar;
 using Content.Shared.Chat;
 using Content.Shared.Communications;
 using Robust.Client.UserInterface;
 using Robust.Shared.Configuration;
 using Robust.Shared.Timing;
+using System.Collections.Generic;
 
 namespace Content.Client.Communications.UI
 {
@@ -24,9 +25,17 @@ namespace Content.Client.Communications.UI
 
             _menu = this.CreateWindow<CommunicationsConsoleMenu>();
             _menu.OnAnnounce += AnnounceButtonPressed;
+            _menu.OnTargetedAnnounce += TargetedAnnounceButtonPressed;
             _menu.OnBroadcast += BroadcastButtonPressed;
             _menu.OnAlertLevel += AlertLevelSelected;
             _menu.OnEmergencyLevel += EmergencyShuttleButtonPressed;
+        }
+
+        private void AnnounceButtonPressed(string message)
+        {
+            var maxLength = _cfg.GetCVar(CCVars.ChatMaxAnnouncementLength);
+            var msg = SharedChatSystem.SanitizeAnnouncement(message, maxLength);
+            SendMessage(new CommunicationsConsoleAnnounceMessage(msg));
         }
 
         public void AlertLevelSelected(string level)
@@ -46,11 +55,14 @@ namespace Content.Client.Communications.UI
                 CallShuttle();
         }
 
-        public void AnnounceButtonPressed(string message)
+        public void TargetedAnnounceButtonPressed(string message, List<NetEntity> stations)
         {
+            if (stations.Count == 0)
+                return;
+            
             var maxLength = _cfg.GetCVar(CCVars.ChatMaxAnnouncementLength);
             var msg = SharedChatSystem.SanitizeAnnouncement(message, maxLength);
-            SendMessage(new CommunicationsConsoleAnnounceMessage(msg));
+            SendMessage(new CommunicationsConsoleTargetedAnnounceMessage(msg, stations));
         }
 
         public void BroadcastButtonPressed(string message)
@@ -78,19 +90,18 @@ namespace Content.Client.Communications.UI
             if (_menu != null)
             {
                 _menu.CanAnnounce = commsState.CanAnnounce;
-                _menu.CanBroadcast = commsState.CanBroadcast;
                 _menu.CanCall = commsState.CanCall;
-                _menu.CountdownStarted = commsState.CountdownStarted;
+                _menu.CountdownStarted = commsState.ExpectedCountdownEnd.HasValue;
                 _menu.AlertLevelSelectable = commsState.AlertLevels != null && !float.IsNaN(commsState.CurrentAlertDelay) && commsState.CurrentAlertDelay <= 0;
                 _menu.CurrentLevel = commsState.CurrentAlert;
                 _menu.CountdownEnd = commsState.ExpectedCountdownEnd;
 
                 _menu.UpdateCountdown();
                 _menu.UpdateAlertLevels(commsState.AlertLevels, _menu.CurrentLevel);
+                _menu.UpdateStations(commsState.Stations);
                 _menu.AlertLevelButton.Disabled = !_menu.AlertLevelSelectable;
                 _menu.EmergencyShuttleButton.Disabled = !_menu.CanCall;
                 _menu.AnnounceButton.Disabled = !_menu.CanAnnounce;
-                _menu.BroadcastButton.Disabled = !_menu.CanBroadcast;
             }
         }
     }

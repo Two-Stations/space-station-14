@@ -133,6 +133,18 @@ public sealed partial class CCVars
         CVarDef.Create("shuttle.emergency_dock_time", 180f, CVar.SERVERONLY);
 
     /// <summary>
+    ///     How long the emergency shuttle will wait at the station before departing.
+    /// </summary>
+    public static readonly CVarDef<float> EmergencyShuttleDepartureTime =
+        CVarDef.Create("shuttle.emergency_departure_time", 300f, CVar.SERVERONLY);
+
+    /// <summary>
+    ///     How long before the emergency shuttle departs that the announcement is made.
+    /// </summary>
+    public static readonly CVarDef<float> EmergencyShuttleLaunchTime =
+        CVarDef.Create("shuttle.emergency_launch_time", 30f, CVar.SERVERONLY);
+
+    /// <summary>
     ///     If the emergency shuttle can't dock at a priority port, the dock time will be multiplied with this value.
     /// </summary>
     public static readonly CVarDef<float> EmergencyShuttleDockTimeMultiplierOtherDock =

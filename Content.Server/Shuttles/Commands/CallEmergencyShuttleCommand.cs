@@ -66,7 +66,8 @@ public sealed class CallEmergencyShuttleCommand : IConsoleCommand
         {
             1 => CompletionResult.FromHint("<time>"),
             2 => CompletionResult.FromHintOptions(
-                _entityManager.EntityQuery<StationDataComponent>().Select(s => s.Owner.ToString()),
+                _entityManager.EntityQuery<StationDataComponent>().Select(s =>
+                    new CompletionOption(_entityManager.GetNetEntity(s.Owner).ToString(), _entityManager.ToPrettyString(s.Owner))),
                 "[stationUid]"),
             _ => CompletionResult.Empty
         };

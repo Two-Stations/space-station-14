@@ -22,6 +22,8 @@ using Robust.Shared.Timing;
 using Content.Shared.DeviceNetwork.Components;
 using Content.Shared.Station.Components;
 using Timer = Robust.Shared.Timing.Timer;
+using Content.Server.Station.Components;
+using System.Linq;
 
 namespace Content.Server.RoundEnd
 {
@@ -50,86 +52,87 @@ namespace Content.Server.RoundEnd
         /// </summary>
         public TimeSpan DefaultCountdownDuration { get; set; } = TimeSpan.FromMinutes(10);
 
-        private CancellationTokenSource? _countdownTokenSource = null;
-        private CancellationTokenSource? _cooldownTokenSource = null;
-        public TimeSpan? LastCountdownStart { get; set; } = null;
-        public TimeSpan? ExpectedCountdownEnd { get; set; } = null;
-        public TimeSpan? ExpectedShuttleLength => ExpectedCountdownEnd - LastCountdownStart;
-        public TimeSpan? ShuttleTimeLeft => ExpectedCountdownEnd - _gameTiming.CurTime;
-
-        /// <summary>
-        /// If the shuttle can't be recalled. if set to true, the station wont be able to recall
-        /// </summary>
-        public bool CantRecall = false;
-
-        public TimeSpan AutoCallStartTime;
-        private bool _autoCalledBefore = false;
+    private readonly Dictionary<EntityUid, CancellationTokenSource> _countdownTokens = new();
+    private readonly Dictionary<EntityUid, CancellationTokenSource> _cooldownTokens = new();
 
         public override void Initialize()
         {
             base.Initialize();
             SubscribeLocalEvent<RoundRestartCleanupEvent>(_ => Reset());
-            SetAutoCallTime();
+            SubscribeLocalEvent<MapInitEvent>(OnMapInit);
         }
 
-        private void SetAutoCallTime()
+        private void OnMapInit(MapInitEvent ev)
         {
-            AutoCallStartTime = _gameTiming.CurTime;
+            var query = AllEntityQuery<StationEmergencyStateComponent>();
+            while (query.MoveNext(out var uid, out var comp))
+            {
+                if (comp.Status == EmergencyShuttleStatus.Called && comp.ShuttleArrivalTime.HasValue)
+                {
+                    var token = new CancellationTokenSource();
+                    _countdownTokens[uid] = token;
+
+                    var dockTime = TimeSpan.FromSeconds(_cfg.GetCVar(CCVars.EmergencyShuttleDockTime));
+                    var countdownTime = comp.ShuttleArrivalTime.Value - _gameTiming.CurTime - dockTime;
+                    Timer.Spawn(countdownTime, () => _shuttle.CallEmergencyShuttle(uid, dockTime), token.Token);
+                }
+
+                if (comp.AutoCallStartTime != default)
+                {
+                    var token = new CancellationTokenSource();
+                    _cooldownTokens[uid] = token;
+
+                    var cooldownTime = DefaultCooldownDuration;
+                    Timer.Spawn(cooldownTime, () =>
+                    {
+                        if (token.IsCancellationRequested)
+                            return;
+                        _cooldownTokens.Remove(uid);
+                        RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
+                    }, token.Token);
+                }
+            }
         }
 
         private void Reset()
         {
-            if (_countdownTokenSource != null)
+            foreach (var token in _countdownTokens.Values)
             {
-                _countdownTokenSource.Cancel();
-                _countdownTokenSource = null;
+                token.Cancel();
             }
+            _countdownTokens.Clear();
 
-            if (_cooldownTokenSource != null)
+            foreach (var token in _cooldownTokens.Values)
             {
-                _cooldownTokenSource.Cancel();
-                _cooldownTokenSource = null;
+                token.Cancel();
             }
-
-            CantRecall = false;
-
-            LastCountdownStart = null;
-            ExpectedCountdownEnd = null;
-            SetAutoCallTime();
-            _autoCalledBefore = false;
-            RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
+            _cooldownTokens.Clear();
         }
 
-        /// <summary>
-        ///     Attempts to get the MapUid of the station using <see cref="StationSystem.GetLargestGrid"/>
-        /// </summary>
-        public EntityUid? GetStation()
+        public bool CanCall(EntityUid station)
         {
-            AllEntityQuery<StationEmergencyShuttleComponent, StationDataComponent>().MoveNext(out var uid, out _, out var data);
-            if (data == null)
-                return null;
-            var targetGrid = _stationSystem.GetLargestGrid((uid, data));
-            return targetGrid == null ? null : Transform(targetGrid.Value).MapUid;
+            if (TryComp<StationEmergencyStateComponent>(station, out var stationState) && stationState.CantRecall)
+                return false;
+
+            return !_cooldownTokens.ContainsKey(station);
         }
 
-        /// <summary>
-        ///     Attempts to get centcomm's MapUid
-        /// </summary>
-        public EntityUid? GetCentcomm()
+        public bool CanRecall(EntityUid station)
         {
-            AllEntityQuery<StationCentcommComponent>().MoveNext(out var centcomm);
+            if (!TryComp<StationEmergencyStateComponent>(station, out var stationState))
+                return false;
 
-            return centcomm == null ? null : centcomm.MapEntity;
+            if (stationState.CantRecall || stationState.IsDockedAtStation)
+                return false;
+
+            return true;
         }
 
-        public bool CanCallOrRecall()
+        public bool IsRoundEndRequested(EntityUid? station = null)
         {
-            return _cooldownTokenSource == null && !CantRecall;
-        }
-
-        public bool IsRoundEndRequested()
-        {
-            return _countdownTokenSource != null;
+            if (station != null)
+                return _countdownTokens.ContainsKey(station.Value);
+            return _countdownTokens.Count > 0;
         }
 
         /// <summary>
@@ -143,19 +146,24 @@ namespace Content.Server.RoundEnd
         public void RequestRoundEnd(EntityUid? requester = null, bool checkCooldown = true, string text = "round-end-system-shuttle-called-announcement", string name = "round-end-system-shuttle-sender-announcement", bool cantRecall = false, EntityUid? station = null)
         {
             var duration = DefaultCountdownDuration;
+            var stationToCall = station;
 
             if (requester != null)
             {
                 var stationUid = _stationSystem.GetOwningStation(requester.Value);
-                if (TryComp<AlertLevelComponent>(stationUid, out var alertLevel))
+                if (stationUid != null)
                 {
-                    duration = _protoManager
-                        .Index<AlertLevelPrototype>(AlertLevelSystem.DefaultAlertLevelSet)
-                        .Levels[alertLevel.CurrentLevel].ShuttleTime;
+                    stationToCall ??= stationUid;
+                    if (TryComp<AlertLevelComponent>(stationUid, out var alertLevel))
+                    {
+                        duration = _protoManager
+                            .Index<AlertLevelPrototype>(AlertLevelSystem.DefaultAlertLevelSet)
+                            .Levels[alertLevel.CurrentLevel].ShuttleTime;
+                    }
                 }
             }
 
-            RequestRoundEnd(duration, requester, checkCooldown, text, name, cantRecall, station);
+            RequestRoundEnd(duration, requester, checkCooldown, text, name, cantRecall, stationToCall);
         }
 
         /// <summary>
@@ -173,25 +181,38 @@ namespace Content.Server.RoundEnd
             if (_gameTicker.RunLevel != GameRunLevel.InRound)
                 return;
 
-            if (checkCooldown && _cooldownTokenSource != null)
+            if (station == null)
+            {
+                var query = EntityQueryEnumerator<StationEmergencyShuttleComponent>();
+                while (query.MoveNext(out var uid, out _))
+                {
+                    RequestRoundEnd(countdownTime, requester, checkCooldown, text, name, cantRecall, uid);
+                }
+                return;
+            }
+
+            if (checkCooldown && _cooldownTokens.ContainsKey(station.Value))
                 return;
 
-            if (_countdownTokenSource != null)
+            if (_countdownTokens.ContainsKey(station.Value))
                 return;
 
-            _countdownTokenSource = new();
-            CantRecall = cantRecall;
+            var stationState = EnsureComp<StationEmergencyStateComponent>(station.Value);
+            stationState.CantRecall = cantRecall;
+            stationState.CountdownEndTime = _gameTiming.CurTime + countdownTime;
+
+            var token = new CancellationTokenSource();
+            _countdownTokens[station.Value] = token;
 
             if (requester != null)
             {
-                _adminLogger.Add(LogType.ShuttleCalled, LogImpact.High, $"Shuttle called by {ToPrettyString(requester.Value):user}");
+                _adminLogger.Add(LogType.ShuttleCalled, LogImpact.High, $"Shuttle called by {ToPrettyString(requester.Value):user} for station {ToPrettyString(station.Value)}");
             }
             else
             {
-                _adminLogger.Add(LogType.ShuttleCalled, LogImpact.High, $"Shuttle called");
+                _adminLogger.Add(LogType.ShuttleCalled, LogImpact.High, $"Shuttle called for station {ToPrettyString(station.Value)}");
             }
 
-            // I originally had these set up here but somehow time gets passed as 0 to Loc so IDEK.
             int time;
             string units;
 
@@ -206,112 +227,160 @@ namespace Content.Server.RoundEnd
                 units = "eta-units-minutes";
             }
 
-            _chatSystem.DispatchGlobalAnnouncement(Loc.GetString(text,
+            _chatSystem.DispatchStationAnnouncement(station.Value, Loc.GetString(text,
                 ("time", time),
                 ("units", Loc.GetString(units))),
                 Loc.GetString(name),
                 false,
-                null,
-                Color.Gold);
+                colorOverride: Color.Gold);
 
-            if (!_autoCalledBefore) _audio.PlayGlobal("/Audio/Announcements/shuttlecalled.ogg", Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4)); // Corvax-Announcements: Custom sound for auto-called
-            else _audio.PlayGlobal("/Audio/Corvax/Announcements/crew_s_called.ogg", Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4)); // Corvax-Announcements
+            if (!stationState.AutoCalledBefore) _audio.PlayGlobal(new SoundPathSpecifier("/Audio/Announcements/shuttlecalled.ogg"), Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4));
+            else _audio.PlayGlobal(new SoundPathSpecifier("/Audio/Corvax/Announcements/crew_s_called.ogg"), Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4));
 
-            LastCountdownStart = _gameTiming.CurTime;
-            ExpectedCountdownEnd = _gameTiming.CurTime + countdownTime;
+            stationState.AutoCalledBefore = true;
 
-            // TODO full game saves
             var dockTime = TimeSpan.FromSeconds(_cfg.GetCVar(CCVars.EmergencyShuttleDockTime));
-            Timer.Spawn(countdownTime, () => _shuttle.CallEmergencyShuttle(station, dockTime), _countdownTokenSource.Token);
+            Timer.Spawn(countdownTime, () => _shuttle.CallEmergencyShuttle(station.Value, dockTime), token.Token);
 
-            ActivateCooldown();
+            ActivateCooldown(station.Value);
             RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
 
-            var destMap = station.HasValue
-                ? Transform(_stationSystem.GetLargestGrid(station.Value)!.Value).MapUid
-                : GetStation();
-
-            var shuttle = _shuttle.GetShuttle();
-            if (shuttle != null && TryComp<DeviceNetworkComponent>(shuttle, out var net))
+            if (TryComp<StationEmergencyShuttleComponent>(station, out var stationShuttle) &&
+                TryComp<DeviceNetworkComponent>(stationShuttle.EmergencyShuttle, out var net))
             {
-                var payload = new NetworkPayload
+                var destMap = Transform(_stationSystem.GetLargestGrid(station.Value)!.Value).MapUid;
+                if(TryComp<StationCentcommComponent>(station, out var centcomm))
                 {
-                    [ShuttleTimerMasks.ShuttleMap] = shuttle,
-                    [ShuttleTimerMasks.SourceMap] = GetCentcomm(),
-                    [ShuttleTimerMasks.DestMap] = destMap,
-                    [ShuttleTimerMasks.ShuttleTime] = countdownTime,
-                    [ShuttleTimerMasks.SourceTime] = countdownTime + TimeSpan.FromSeconds(_shuttle.TransitTime + _cfg.GetCVar(CCVars.EmergencyShuttleDockTime)),
-                    [ShuttleTimerMasks.DestTime] = countdownTime,
-                };
-                _deviceNetworkSystem.QueuePacket(shuttle.Value, null, payload, net.TransmitFrequency);
+                    var payload = new NetworkPayload
+                    {
+                        [ShuttleTimerMasks.ShuttleMap] = stationShuttle.EmergencyShuttle,
+                        [ShuttleTimerMasks.SourceMap] = centcomm.MapEntity,
+                        [ShuttleTimerMasks.DestMap] = destMap,
+                        [ShuttleTimerMasks.ShuttleTime] = countdownTime,
+                        [ShuttleTimerMasks.SourceTime] = countdownTime + TimeSpan.FromSeconds(stationState.TransitTime + _cfg.GetCVar(CCVars.EmergencyShuttleDockTime)),
+                        [ShuttleTimerMasks.DestTime] = countdownTime,
+                    };
+                    _deviceNetworkSystem.QueuePacket(stationShuttle.EmergencyShuttle.Value, null, payload, net.TransmitFrequency);
+                }
             }
         }
 
-        public void CancelRoundEndCountdown(EntityUid? requester = null, bool forceRecall = false, EntityUid? station = null)
+        public IReadOnlyList<EntityUid> GetStationsWithActiveCountdown() => _countdownTokens.Keys.ToList();
+
+        private bool CancelSingleStation(EntityUid station, EntityUid? requester, bool forceRecall)
         {
-            if (_gameTicker.RunLevel != GameRunLevel.InRound)
-                return;
+            if (!TryComp<StationEmergencyStateComponent>(station, out var stationState))
+                return false;
 
-            if (_shuttle.IsAnyShuttleCalled())
-            {
-                _shuttle.RecallShuttle(station);
-            }
+            stationState.CountdownEndTime = null;
 
-            if (!forceRecall && CantRecall)
-                return;
+            // Disallow recalling if the shuttle is already docked, unless forced by an admin.
+            if (!forceRecall && (stationState.CantRecall || stationState.IsDockedAtStation))
+                return false;
 
-            if (_countdownTokenSource == null)
-                return;
+            if (!_countdownTokens.TryGetValue(station, out var token))
+                return false;
 
-            _countdownTokenSource.Cancel();
-            _countdownTokenSource = null;
+            _shuttle.RecallShuttle(station);
+            token.Cancel();
+            _countdownTokens.Remove(station);
 
             if (requester != null)
-            {
-                _adminLogger.Add(LogType.ShuttleRecalled, LogImpact.High, $"Shuttle recalled by {ToPrettyString(requester.Value):user}");
-            }
+                _adminLogger.Add(LogType.ShuttleRecalled, LogImpact.High, $"Shuttle for station {ToPrettyString(station)} recalled by {ToPrettyString(requester.Value):user}");
             else
-            {
-                _adminLogger.Add(LogType.ShuttleRecalled, LogImpact.High, $"Shuttle recalled");
-            }
+                _adminLogger.Add(LogType.ShuttleRecalled, LogImpact.High, $"Shuttle for station {ToPrettyString(station)} recalled");
 
-            _chatSystem.DispatchGlobalAnnouncement(Loc.GetString("round-end-system-shuttle-recalled-announcement"),
-                Loc.GetString("round-end-system-shuttle-sender-announcement"), false, colorOverride: Color.Gold);
-
-            _audio.PlayGlobal("/Audio/Announcements/shuttlerecalled.ogg", Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4)); // Corvax-Announcements: Decrease volume
-
-            LastCountdownStart = null;
-            ExpectedCountdownEnd = null;
-            ActivateCooldown();
+            ActivateCooldown(station);
             RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
 
             // remove active clientside evac shuttle timers by zeroing the target time
             var zero = TimeSpan.Zero;
-            var shuttle = _shuttle.GetShuttle();
+            var shuttle = _shuttle.GetShuttle(station);
             if (shuttle != null && TryComp<DeviceNetworkComponent>(shuttle, out var net))
             {
                 var payload = new NetworkPayload
                 {
                     [ShuttleTimerMasks.ShuttleMap] = shuttle,
-                    [ShuttleTimerMasks.SourceMap] = GetCentcomm(),
-                    [ShuttleTimerMasks.DestMap] = GetStation(),
                     [ShuttleTimerMasks.ShuttleTime] = zero,
                     [ShuttleTimerMasks.SourceTime] = zero,
                     [ShuttleTimerMasks.DestTime] = zero,
                 };
+
+                if (TryComp<StationCentcommComponent>(station, out var centcomm))
+                {
+                    payload[ShuttleTimerMasks.SourceMap] = centcomm.MapEntity;
+                }
+
+                if (TryComp<StationDataComponent>(station, out var stationData))
+                {
+                    var grid = _stationSystem.GetLargestGrid((station, stationData));
+                    if (grid.HasValue)
+                    {
+                        payload[ShuttleTimerMasks.DestMap] = Transform(grid.Value).MapUid;
+                    }
+                }
+
                 _deviceNetworkSystem.QueuePacket(shuttle.Value, null, payload, net.TransmitFrequency);
+            }
+
+            return true;
+        }
+
+        public void CancelRoundEndCountdown(EntityUid? requester = null, bool forceRecall = false, EntityUid? station = null, bool announce = true)
+        {
+            if (_gameTicker.RunLevel != GameRunLevel.InRound)
+                return;
+
+            // No station specified, so recall all of them.
+            if (station == null)
+            {
+                var recalledAny = false;
+                var stationsToRecall = GetStationsWithActiveCountdown().ToList();
+                foreach (var stationToRecall in stationsToRecall)
+                {
+                    if (CancelSingleStation(stationToRecall, requester, forceRecall))
+                    {
+                        recalledAny = true;
+                    }
+                }
+
+                if (recalledAny && announce)
+                {
+                    _chatSystem.DispatchGlobalAnnouncement(Loc.GetString("round-end-system-shuttle-recalled-announcement"),
+                        Loc.GetString("round-end-system-shuttle-sender-announcement"), false, colorOverride: Color.Gold);
+
+                    _audio.PlayGlobal(new SoundPathSpecifier("/Audio/Announcements/shuttlerecalled.ogg"), Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4));
+                }
+
+                return;
+            }
+
+            // Logic for a single station
+            if (!CancelSingleStation(station.Value, requester, forceRecall))
+                return;
+
+            if (announce)
+            {
+                _chatSystem.DispatchGlobalAnnouncement(Loc.GetString("round-end-system-shuttle-recalled-announcement"),
+                    Loc.GetString("round-end-system-shuttle-sender-announcement"), false, colorOverride: Color.Gold);
+
+                _audio.PlayGlobal(new SoundPathSpecifier("/Audio/Announcements/shuttlerecalled.ogg"), Filter.Broadcast(), true, AudioParams.Default.AddVolume(-4)); // Corvax-Announcements: Decrease volume
             }
         }
 
         public void EndRound(TimeSpan? countdownTime = null)
         {
             if (_gameTicker.RunLevel != GameRunLevel.InRound) return;
-            LastCountdownStart = null;
-            ExpectedCountdownEnd = null;
+
+            foreach (var token in _countdownTokens.Values)
+            {
+                token.Cancel();
+            }
+            _countdownTokens.Clear();
             RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
+
             _gameTicker.EndRound();
-            _countdownTokenSource?.Cancel();
-            _countdownTokenSource = new();
+            var roundEndCts = new CancellationTokenSource();
 
             countdownTime ??= TimeSpan.FromSeconds(_cfg.GetCVar(CCVars.RoundRestartTime));
             int time;
@@ -331,7 +400,7 @@ namespace Content.Server.RoundEnd
                     "round-end-system-round-restart-eta-announcement",
                     ("time", time),
                     ("units", Loc.GetString(unitsLocString))));
-            Timer.Spawn(countdownTime.Value, AfterEndRoundRestart, _countdownTokenSource.Token);
+            Timer.Spawn(countdownTime.Value, AfterEndRoundRestart, roundEndCts.Token);
         }
 
         /// <summary>
@@ -377,35 +446,51 @@ namespace Content.Server.RoundEnd
             _gameTicker.RestartRound();
         }
 
-        private void ActivateCooldown()
+        private void ActivateCooldown(EntityUid? station = null)
         {
-            _cooldownTokenSource?.Cancel();
-            _cooldownTokenSource = new();
-
-            // TODO full game saves
-            Timer.Spawn(DefaultCooldownDuration, () =>
+            if (station != null)
             {
-                _cooldownTokenSource.Cancel();
-                _cooldownTokenSource = null;
-                RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
-            }, _cooldownTokenSource.Token);
+                var token = new CancellationTokenSource();
+                _cooldownTokens[station.Value] = token;
+
+                Timer.Spawn(DefaultCooldownDuration, () =>
+                {
+                    if (token.IsCancellationRequested)
+                        return;
+                    _cooldownTokens.Remove(station.Value);
+                    RaiseLocalEvent(RoundEndSystemChangedEvent.Default);
+                }, token.Token);
+            }
+            else
+            {
+                var query = EntityQueryEnumerator<StationEmergencyShuttleComponent>();
+                while (query.MoveNext(out var uid, out _))
+                {
+                    if (!_cooldownTokens.ContainsKey(uid))
+                    {
+                        ActivateCooldown(uid);
+                    }
+                }
+            }
         }
 
         public override void Update(float frameTime)
         {
-            // Check if we should auto-call.
-            int mins = _autoCalledBefore ? _cfg.GetCVar(CCVars.EmergencyShuttleAutoCallExtensionTime)
-                                        : _cfg.GetCVar(CCVars.EmergencyShuttleAutoCallTime);
-            if (mins != 0 && _gameTiming.CurTime - AutoCallStartTime > TimeSpan.FromMinutes(mins))
+            var query = EntityQueryEnumerator<StationEmergencyStateComponent>();
+            while (query.MoveNext(out var uid, out var comp))
             {
-                if (!_shuttle.IsAnyShuttleCalled() && ExpectedCountdownEnd is null)
+                var mins = comp.AutoCalledBefore ? _cfg.GetCVar(CCVars.EmergencyShuttleAutoCallExtensionTime)
+                                                : _cfg.GetCVar(CCVars.EmergencyShuttleAutoCallTime);
+                if (mins != 0 && _gameTiming.CurTime - comp.AutoCallStartTime > TimeSpan.FromMinutes(mins))
                 {
-                    _autoCalledBefore = true; // Corvax-Announcements: Move before call RequestRoundEnd to play correct announcement sound type
-                    RequestRoundEnd(null, false, "round-end-system-shuttle-auto-called-announcement");
-                }
+                    if (comp.Status == EmergencyShuttleStatus.Uncalled)
+                    {
+                        RequestRoundEnd(null, false, "round-end-system-shuttle-auto-called-announcement", station: uid);
+                    }
 
-                // Always reset auto-call in case of a recall.
-                SetAutoCallTime();
+                    // Always reset auto-call in case of a recall.
+                    comp.AutoCallStartTime = _gameTiming.CurTime;
+                }
             }
         }
     }

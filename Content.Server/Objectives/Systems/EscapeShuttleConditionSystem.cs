@@ -3,38 +3,43 @@ using Content.Server.Shuttles.Systems;
 using Content.Shared.Cuffs.Components;
 using Content.Shared.Mind;
 using Content.Shared.Objectives.Components;
+using Content.Server.Shuttles.Events;
+using Content.Server.Objectives.Systems;
 
 namespace Content.Server.Objectives.Systems;
 
 public sealed class EscapeShuttleConditionSystem : EntitySystem
 {
     [Dependency] private readonly EmergencyShuttleSystem _emergencyShuttle = default!;
-    [Dependency] private readonly SharedMindSystem _mind = default!;
 
     public override void Initialize()
     {
         base.Initialize();
 
-        SubscribeLocalEvent<EscapeShuttleConditionComponent, ObjectiveGetProgressEvent>(OnGetProgress);
+        SubscribeLocalEvent<EmergencyShuttleDepartedEvent>(OnShuttleDepart);
     }
 
-    private void OnGetProgress(EntityUid uid, EscapeShuttleConditionComponent comp, ref ObjectiveGetProgressEvent args)
+    private void OnShuttleDepart(EmergencyShuttleDepartedEvent ev)
     {
-        args.Progress = GetProgress(args.MindId, args.Mind);
-    }
+        var query = EntityQueryEnumerator<EscapeShuttleConditionComponent, MindComponent, ObjectiveComponent>();
+        while (query.MoveNext(out var uid, out var comp, out var mind, out var obj))
+        {
+            if (mind.OwnedEntity is not { } owner)
+                continue;
 
-    private float GetProgress(EntityUid mindId, MindComponent mind)
-    {
-        // not escaping alive if you're deleted/dead
-        if (mind.OwnedEntity == null || _mind.IsCharacterDeadIc(mind))
-            return 0f;
+            // if they aren't on the shuttle then ignore it
+            if (!_emergencyShuttle.IsTargetEscaping(owner))
+                continue;
 
-        // You're not escaping if you're restrained!
-        // Granting 50% as to allow for partial completion of the objective.
-        if (TryComp<CuffableComponent>(mind.OwnedEntity, out var cuffed) && cuffed.CuffedHandCount > 0)
-            return _emergencyShuttle.IsTargetEscaping(mind.OwnedEntity.Value) ? 0.5f : 0f;
+            var evnt = new ObjectiveGetProgressEvent(mind.Owner, mind, 0f);
 
-        // Any emergency shuttle counts for this objective, but not pods.
-        return _emergencyShuttle.IsTargetEscaping(mind.OwnedEntity.Value) ? 1f : 0f;
+            // You're not escaping if you're restrained!
+            if (TryComp<CuffableComponent>(owner, out var cuffed) && cuffed.CuffedHandCount > 0)
+                evnt.Progress = 0.5f;
+            else
+                evnt.Progress = 1f;
+
+            RaiseLocalEvent(uid, ref evnt);
+        }
     }
 }

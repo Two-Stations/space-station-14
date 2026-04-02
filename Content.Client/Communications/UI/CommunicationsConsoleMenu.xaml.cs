@@ -6,6 +6,9 @@ using Robust.Client.UserInterface.XAML;
 using Robust.Shared.Configuration;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
+using System.Collections.Generic;
+using Robust.Client.UserInterface.Controls;
+using Content.Shared.Communications;
 
 namespace Content.Client.Communications.UI
 {
@@ -15,6 +18,8 @@ namespace Content.Client.Communications.UI
         [Dependency] private readonly IConfigurationManager _cfg = default!;
         [Dependency] private readonly IGameTiming _timing = default!;
         [Dependency] private readonly ILocalizationManager _loc = default!;
+        
+        private readonly Dictionary<CheckBox, NetEntity> _stationCheckBoxes = new();
 
         public bool CanAnnounce;
         public bool CanBroadcast;
@@ -27,6 +32,7 @@ namespace Content.Client.Communications.UI
         public event Action? OnEmergencyLevel;
         public event Action<string>? OnAlertLevel;
         public event Action<string>? OnAnnounce;
+        public event Action<string, List<NetEntity>>? OnTargetedAnnounce;
         public event Action<string>? OnBroadcast;
 
         public CommunicationsConsoleMenu()
@@ -52,10 +58,29 @@ namespace Content.Client.Communications.UI
                 }
             };
 
-            AnnounceButton.OnPressed += _ => OnAnnounce?.Invoke(Rope.Collapse(MessageInput.TextRope));
+            AnnounceButton.OnPressed += _ =>
+            {
+                if (_stationCheckBoxes.Count > 0)
+                {
+                    var selected = new List<NetEntity>();
+                    foreach (var (checkBox, netEntity) in _stationCheckBoxes)
+                    {
+                        if (checkBox.Pressed)
+                        {
+                            selected.Add(netEntity);
+                        }
+                    }
+                    OnTargetedAnnounce?.Invoke(Rope.Collapse(MessageInput.TextRope)!, selected);
+                }
+                else
+                {
+                    OnAnnounce?.Invoke(Rope.Collapse(MessageInput.TextRope)!);
+                }
+            };
+
             AnnounceButton.Disabled = !CanAnnounce;
 
-            BroadcastButton.OnPressed += _ => OnBroadcast?.Invoke(Rope.Collapse(MessageInput.TextRope));
+            BroadcastButton.OnPressed += _ => OnBroadcast?.Invoke(Rope.Collapse(MessageInput.TextRope)!);
             BroadcastButton.Disabled = !CanBroadcast;
 
             AlertLevelButton.OnItemSelected += args =>
@@ -80,10 +105,25 @@ namespace Content.Client.Communications.UI
             UpdateCountdown();
         }
 
-        // The current alert could make levels unselectable, so we need to ensure that the UI reacts properly.
-        // If the current alert is unselectable, the only item in the alerts list will be
-        // the current alert. Otherwise, it will be the list of alerts, with the current alert
-        // selected.
+        public void UpdateStations(List<StationInfo> stations)
+        {
+            StationList.RemoveAllChildren();
+            _stationCheckBoxes.Clear();
+
+            StationList.Visible = stations.Count > 0;
+
+            foreach (var station in stations)
+            {
+                var checkBox = new CheckBox
+                {
+                    Text = station.Name,
+                    Pressed = true, // Default to selected
+                };
+                _stationCheckBoxes.Add(checkBox, station.Uid);
+                StationList.AddChild(checkBox);
+            }
+        }
+
         public void UpdateAlertLevels(List<string>? alerts, string currentAlert)
         {
             AlertLevelButton.Clear();

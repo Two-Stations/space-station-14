@@ -21,7 +21,20 @@ public sealed class DockEmergencyShuttleCommand : LocalizedEntityCommands
 
     public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
+        if (args.Length != 1)
+        {
+            shell.WriteLine("Usage: dockemergencyshuttle <station uid>");
+            return;
+        }
+
+        if (!NetEntity.TryParse(args[0], out var stationNet) ||
+            !EntityManager.TryGetEntity(stationNet, out var stationUid))
+        {
+            shell.WriteLine("Invalid station uid.");
+            return;
+        }
+
         var time = TimeSpan.FromSeconds(_configManager.GetCVar(CCVars.EmergencyShuttleDockTime));
-        _shuttleSystem.CallEmergencyShuttle(null, time);
+        _shuttleSystem.CallEmergencyShuttle(stationUid.Value, time);
     }
 }

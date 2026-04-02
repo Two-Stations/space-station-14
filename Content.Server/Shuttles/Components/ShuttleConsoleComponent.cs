@@ -9,6 +9,9 @@ namespace Content.Server.Shuttles.Components
         [ViewVariables]
         public readonly List<EntityUid> SubscribedPilots = new();
 
+        [ViewVariables(VVAccess.ReadWrite)]
+        public bool AllowedToLaunch { get; set; }
+
         /// <summary>
         /// How much should the pilot's eye be zoomed by when piloting using this console?
         /// </summary>

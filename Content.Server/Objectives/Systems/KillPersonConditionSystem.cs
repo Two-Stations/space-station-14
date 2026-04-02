@@ -4,6 +4,8 @@ using Content.Shared.CCVar;
 using Content.Shared.Mind;
 using Content.Shared.Objectives.Components;
 using Robust.Shared.Configuration;
+using Content.Server.Station.Components;
+using System.Linq;
 
 namespace Content.Server.Objectives.Systems;
 
@@ -49,16 +51,32 @@ public sealed class KillPersonConditionSystem : EntitySystem
         if (requireDead && !targetDead)
             return 0f;
 
+        var shuttleArrived = false;
+        var shuttleLeft = false;
+        var query = AllEntityQuery<StationEmergencyStateComponent>();
+        while(query.MoveNext(out var comp))
+        {
+            if (comp.Status >= EmergencyShuttleStatus.Arrived)
+            {
+                shuttleArrived = true;
+            }
+            if (comp.Status >= EmergencyShuttleStatus.Departed)
+            {
+                shuttleLeft = true;
+                break;
+            }
+        }
+
         // Always failed if the target needs to be marooned and the shuttle hasn't even arrived yet
-        if (requireMaroon && !_emergencyShuttle.EmergencyShuttleArrived)
+        if (requireMaroon && !shuttleArrived)
             return 0f;
 
         // If the shuttle hasn't left, give 50% progress if the target isn't on the shuttle as a "almost there!"
-        if (requireMaroon && !_emergencyShuttle.ShuttlesLeft)
+        if (requireMaroon && !shuttleLeft)
             return targetMarooned ? 0.5f : 0f;
 
         // If the shuttle has already left, and the target isn't on it, 100%
-        if (requireMaroon && _emergencyShuttle.ShuttlesLeft)
+        if (requireMaroon && shuttleLeft)
             return targetMarooned ? 1f : 0f;
 
         return 1f; // Good job you did it woohoo

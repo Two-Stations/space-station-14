@@ -1,15 +1,19 @@
 <DefaultWindow xmlns="https://spacestation14.io"
-            xmlns:cc="clr-namespace:Content.Client.Administration.UI.CustomControls"
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+            x:Class="Content.Client.Administration.UI.Tabs.AdminTab.AdminShuttleWindow"
             Title="{Loc 'admin-shuttle-title'}"
-            MinWidth="300">
-    <BoxContainer Orientation="Vertical">
-        <BoxContainer Orientation="Horizontal" HorizontalExpand="True">
-            <LineEdit Name="_callShuttleTime" Text="4:00" PlaceHolder="m:ss" HorizontalExpand="True" SizeFlagsStretchRatio="2"/>
-            <Control HorizontalExpand="True" SizeFlagsStretchRatio="1"/>
-            <cc:CommandButton Command="callshuttle 4:00" Name="_callShuttleButton" Text="{Loc 'comms-console-menu-call-shuttle'}" HorizontalExpand="True" SizeFlagsStretchRatio="2" />
-            <!-- Corvax: Move button -->
-            <cc:CommandButton Command="recallshuttle" Name="_recallShuttleButton" Text="{Loc 'comms-console-menu-recall-shuttle'}" HorizontalAlignment="Center" SizeFlagsStretchRatio="3" />
-        </BoxContainer>
+            MinSize="500 200">
+    <BoxContainer Name="MasterContainer" Orientation="Vertical" VerticalExpand="True">
+        <Button Name="RefreshButton"
+                Text="{Loc 'admin-shuttle-refresh-button'}"
+                MinWidth="100"
+                HorizontalAlignment="Right"
+                Margin="0 0 5 5"/>
+        <ScrollContainer VerticalExpand="True">
+            <BoxContainer Name="StationContainer"
+                          Orientation="Vertical"
+                          HorizontalExpand="True"
+                          VerticalExpand="True"/>
+        </ScrollContainer>
     </BoxContainer>
-
 </DefaultWindow>
